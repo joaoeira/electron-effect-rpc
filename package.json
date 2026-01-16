@@ -37,8 +37,11 @@
     "electron": ">=28.0.0"
   },
   "devDependencies": {
+    "@effect/schema": "^0.69.0",
     "@types/node": "^22.0.0",
     "bun-types": "^1.1.0",
+    "effect": "^3.11.0",
+    "electron": "^38.0.0",
     "typescript": "^5.7.0"
   }
 }
