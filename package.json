@@ -1,20 +1,40 @@
 {
   "name": "electron-effect-rpc",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Typed IPC RPC for Electron, built on Effect and @effect/schema",
   "type": "module",
   "exports": {
-    "./main": "./src/main.ts",
-    "./renderer": "./src/renderer.ts",
-    "./preload": "./src/preload.ts",
-    "./contract": "./src/contract.ts",
-    "./types": "./src/types.ts",
-    "./testing": "./src/testing.ts"
+    "./main": {
+      "types": "./dist/main.d.ts",
+      "default": "./dist/main.js"
+    },
+    "./renderer": {
+      "types": "./dist/renderer.d.ts",
+      "default": "./dist/renderer.js"
+    },
+    "./preload": {
+      "types": "./dist/preload.d.ts",
+      "default": "./dist/preload.js"
+    },
+    "./contract": {
+      "types": "./dist/contract.d.ts",
+      "default": "./dist/contract.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "default": "./dist/types.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    }
   },
   "files": [
-    "src"
+    "dist"
   ],
   "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "bun run build",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
