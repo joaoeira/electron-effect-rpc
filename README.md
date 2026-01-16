@@ -30,7 +30,21 @@ and let the workspace resolver handle the rest.
 
 ## Core Concepts
 
-### Methods and events
+### Communication directions
+
+This library provides two communication patterns for Electron IPC:
+
+| Direction | Mechanism | Pattern | Use case |
+|-----------|-----------|---------|----------|
+| **Renderer → Main** | RPC methods | Request/response | Fetching data, triggering actions, calling main process APIs |
+| **Main → Renderer** | Event bus | Push/broadcast | Progress updates, state changes, background task notifications |
+
+**RPC methods** are for when the renderer needs something from the main process. The renderer calls a method and awaits a typed response.
+
+**Events** are for when the main process needs to notify the renderer. The main process emits events whenever it wants, and the renderer subscribes to receive them.
+
+### Defining methods and events
+
 Define methods and events using schema-based helpers:
 
 ```ts
