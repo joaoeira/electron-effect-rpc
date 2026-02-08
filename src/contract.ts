@@ -5,7 +5,11 @@ export type SchemaNoContext = S.Schema.AnyNoContext;
 export const NoError = S.Never;
 export type NoError = typeof NoError;
 
-export type ErrorSchema = SchemaNoContext | S.Schema<never, never, never>;
+export type ErrorSchema = SchemaNoContext | NoError;
+
+export function isNoErrorSchema(schema: ErrorSchema): schema is NoError {
+  return schema === NoError;
+}
 
 export interface RpcMethod<
   Name extends string,
@@ -115,7 +119,7 @@ export interface RpcContract<
   readonly events: Events;
 }
 
-const collectDuplicates = (names: ReadonlyArray<string>): Array<string> => {
+function collectDuplicates(names: ReadonlyArray<string>): Array<string> {
   const counts = new Map<string, number>();
   const duplicates: string[] = [];
 
@@ -128,15 +132,17 @@ const collectDuplicates = (names: ReadonlyArray<string>): Array<string> => {
   }
 
   return duplicates;
-};
+}
 
-export const defineContract = <
+export function defineContract<
   const Methods extends ReadonlyArray<AnyMethod>,
   const Events extends ReadonlyArray<AnyEvent>
->(input: {
-  readonly methods: Methods;
-  readonly events: Events;
-}): RpcContract<Methods, Events> => {
+>(
+  input: {
+    readonly methods: Methods;
+    readonly events: Events;
+  }
+): RpcContract<Methods, Events> {
   const { methods, events } = input;
 
   if (!Array.isArray(methods)) {
@@ -162,4 +168,4 @@ export const defineContract = <
   }
 
   return input;
-};
+}

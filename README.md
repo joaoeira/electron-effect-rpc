@@ -11,9 +11,10 @@ uses Electron 38) and assumes ESM-capable bundling.
 - Single shared contract for methods and events.
 - End-to-end type safety using @effect/schema.
 - Promise-based renderer client with typed errors.
-- Effect-based main handlers with optional runtime injection.
-- Event bus and subscriber for typed renderer events.
-- No protocol handshake or versioning; schema decoding is the source of truth.
+- Effect-based main handlers with explicit runtime injection.
+- Explicit lifecycle handles for main-process RPC and event publishing.
+- Bounded event queue with drop-oldest backpressure.
+- Structured diagnostics hooks for decode/protocol/dispatch failures.
 
 ## Requirements
 - Electron with context isolation enabled.
@@ -99,36 +100,43 @@ export const ReadTextFile = rpc(
 ```ts
 import { app, ipcMain } from "electron";
 import { Effect } from "effect";
-import { createRpcServer, createEventBus } from "electron-effect-rpc/main";
+import * as Runtime from "effect/Runtime";
+import { createRpcEndpoint, createEventPublisher } from "electron-effect-rpc/main";
 import { contract, WorkUnitProgress } from "./contract.ts";
 
 const implementations = {
   GetAppVersion: () => Effect.succeed({ version: app.getVersion() }),
 };
 
-createRpcServer(contract, ipcMain, implementations);
+const endpoint = createRpcEndpoint(contract, ipcMain, implementations, {
+  runtime: Runtime.defaultRuntime,
+});
+endpoint.start();
 
-const eventBus = createEventBus(contract, {
+const publisher = createEventPublisher(contract, {
   getWindow: () => mainWindow,
 });
+publisher.start();
 
-eventBus.emit(WorkUnitProgress, {
+publisher.publish(WorkUnitProgress, {
   requestId: "req-1",
   chunk: "working...",
   done: false,
 });
 ```
 
-If your handlers require services in the Effect environment, provide a runtime:
+Pass the runtime used to execute handler effects:
 
 ```ts
 import * as Runtime from "effect/Runtime";
-import { createRpcServer } from "electron-effect-rpc/main";
+import { createRpcEndpoint } from "electron-effect-rpc/main";
 import { contract } from "./contract.ts";
 
-createRpcServer(contract, ipcMain, implementations, {
+const endpoint = createRpcEndpoint(contract, ipcMain, implementations, {
   runtime: Runtime.defaultRuntime,
 });
+
+endpoint.start();
 ```
 
 ### Preload: expose bridge globals
@@ -152,13 +160,25 @@ exposeRpcBridge({
 });
 ```
 
+Or use low-level bridge adapters for custom exposure:
+```ts
+import { createBridgeAdapters } from "electron-effect-rpc/preload";
+
+const bridge = createBridgeAdapters();
+// bridge.invoke(method, payload)
+// bridge.subscribe(name, handler)
+```
+
 ### Renderer: create client and subscriber
 ```ts
 import { createRpcClient, createEventSubscriber } from "electron-effect-rpc/renderer";
 import { contract, WorkUnitProgress } from "./contract.ts";
 
 const client = createRpcClient(contract, { invoke: window.rpc.invoke });
-const events = createEventSubscriber(contract, { subscribe: window.events.subscribe });
+const events = createEventSubscriber(contract, {
+  subscribe: window.events.subscribe,
+  decodeMode: "safe", // default
+});
 
 const { version } = await client.GetAppVersion();
 
@@ -194,8 +214,10 @@ import { createInvokeStub } from "electron-effect-rpc/testing";
 import { contract } from "./contract.ts";
 
 const invoke = createInvokeStub(async (method, payload) => {
-  // return encoded Exit values from your handler logic
-  return payload;
+  return {
+    type: "success",
+    data: { version: "1.0.0" },
+  };
 });
 
 const client = createRpcClient(contract, { invoke });
@@ -210,7 +232,8 @@ expect(invoke.invocations).toEqual([
 You can stub `IpcMainLike` and collect registered handlers:
 
 ```ts
-import { createRpcServer } from "electron-effect-rpc/main";
+import * as Runtime from "effect/Runtime";
+import { createRpcEndpoint } from "electron-effect-rpc/main";
 import type { IpcMainLike } from "electron-effect-rpc/types";
 import { contract } from "./contract.ts";
 
@@ -219,9 +242,15 @@ const ipcMainStub: IpcMainLike = {
   handle: (channel, handler) => {
     handlers.set(channel, handler);
   },
+  removeHandler: (channel) => {
+    handlers.delete(channel);
+  },
 };
 
-createRpcServer(contract, ipcMainStub, implementations);
+const endpoint = createRpcEndpoint(contract, ipcMainStub, implementations, {
+  runtime: Runtime.defaultRuntime,
+});
+endpoint.start();
 ```
 
 ## Error Handling
@@ -236,13 +265,13 @@ Entry points:
 - `electron-effect-rpc/contract`
   - `rpc`, `event`, `defineContract`, `exitSchemaFor`, `SchemaNoContext`, `NoError`
 - `electron-effect-rpc/types`
-  - Type aliases such as `Implementations`, `RpcClient`, `RpcEventBus`, `IpcMainLike`
+  - Type aliases such as `Implementations`, `RpcClient`, `RpcEventPublisher`, `IpcMainLike`
 - `electron-effect-rpc/main`
-  - `createRpcServer`, `createEventBus`
+  - `createRpcEndpoint`, `createEventPublisher`
 - `electron-effect-rpc/renderer`
   - `createRpcClient`, `createEventSubscriber`, `RpcDefectError`
 - `electron-effect-rpc/preload`
-  - `exposeRpcBridge`
+  - `exposeRpcBridge`, `createBridgeAdapters`
 - `electron-effect-rpc/testing`
   - `createInvokeStub`, `createDeferred`
 

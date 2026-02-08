@@ -1,29 +1,51 @@
 import * as S from "@effect/schema/Schema";
-import { Effect, PubSub, Stream } from "effect";
+import { Cause, Effect, Exit } from "effect";
 import * as Runtime from "effect/Runtime";
-import {
-  exitSchemaFor,
-  type RpcContract,
-  type RpcError,
-  type RpcEventPayload,
-  type RpcInput,
-  type RpcOutput,
+import type {
+  RpcContract,
+  RpcError,
+  RpcEventPayload,
+  RpcInput,
+  RpcOutput,
 } from "./contract.ts";
+import { isNoErrorSchema } from "./contract.ts";
+import {
+  extractErrorTag,
+  safelyCall,
+  toDefectEnvelope,
+  type RpcResponseEnvelope,
+} from "./protocol.ts";
 import {
   defaultChannelPrefix,
   type AnyEvent,
   type AnyMethod,
-  type EventBusOptions,
+  type ChannelPrefix,
+  type EventPublisherOptions,
   type Implementations,
   type IpcMainLike,
-  type RpcEventBus,
-  type RpcServerOptions,
+  type RpcEndpoint,
+  type RpcEndpointOptions,
+  type RpcEventPublisher,
 } from "./types.ts";
 
-const resolveChannelPrefix = (prefix: EventBusOptions["channelPrefix"]) =>
-  prefix ?? defaultChannelPrefix;
+type RpcListener = (
+  event: unknown,
+  payload: unknown
+) => Promise<RpcResponseEnvelope>;
 
-export const createRpcServer = <
+function resolveChannelPrefix(prefix: ChannelPrefix | undefined): ChannelPrefix {
+  return prefix ?? defaultChannelPrefix;
+}
+
+function isImplementation<M extends AnyMethod, R>(
+  value: unknown
+): value is (
+  input: RpcInput<M>
+) => Effect.Effect<RpcOutput<M>, RpcError<M>, R> {
+  return typeof value === "function";
+}
+
+export function createRpcEndpoint<
   const Methods extends ReadonlyArray<AnyMethod>,
   const Events extends ReadonlyArray<AnyEvent>,
   R = never
@@ -31,17 +53,12 @@ export const createRpcServer = <
   contract: RpcContract<Methods, Events>,
   ipc: IpcMainLike,
   implementations: Implementations<RpcContract<Methods, Events>, R>,
-  options?: RpcServerOptions<R>
-): void => {
-  const channelPrefix = resolveChannelPrefix(options?.channelPrefix);
-  const runPromiseExit = <A, E>(effect: Effect.Effect<A, E, R>) => {
-    if (options?.runtime) {
-      return Runtime.runPromiseExit(options.runtime)(effect);
-    }
+  options: RpcEndpointOptions<R>
+): RpcEndpoint {
+  const channelPrefix = resolveChannelPrefix(options.channelPrefix);
+  const diagnostics = options.diagnostics;
+  const runPromiseExit = Runtime.runPromiseExit(options.runtime);
 
-    // @ts-expect-error -- default runtime only supports R=never when no runtime is provided
-    return Effect.runPromiseExit(effect);
-  };
   const implementationsByName: Implementations<RpcContract<Methods, Events>, R> &
     Record<string, unknown> = implementations;
 
@@ -53,117 +70,359 @@ export const createRpcServer = <
     }
   }
 
-  contract.methods.forEach((method: Methods[number]) => {
+  function reportProtocolError(
+    method: string,
+    response: unknown,
+    cause: unknown
+  ): void {
+    safelyCall(diagnostics?.onProtocolError, {
+      method,
+      response,
+      cause,
+    });
+  }
+
+  const listeners = new Map<string, RpcListener>();
+
+  for (const method of contract.methods) {
     const impl = implementationsByName[method.name];
     if (!isImplementation<typeof method, R>(impl)) {
       throw new Error(`Missing implementation for RPC method: ${method.name}`);
     }
 
-    const exitSchema = exitSchemaFor(method);
-    const encodeExit = S.encodeUnknownSync(exitSchema);
     const decodeInput = S.decodeUnknownSync(method.req);
+    const encodeSuccess = S.encodeSync(method.res);
+    const encodeFailure = isNoErrorSchema(method.err)
+      ? null
+      : S.encodeSync(method.err);
+
     const channel = `${channelPrefix.rpc}${method.name}`;
 
-    ipc.handle(channel, async (_event, rawPayload) => {
-      let input: RpcInput<typeof method>;
-      try {
-        input = decodeInput(rawPayload);
-      } catch (cause) {
-        const defectExit = await runPromiseExit(Effect.die(cause));
-        return encodeExit(defectExit);
+    listeners.set(
+      channel,
+      async function handleRpcRequest(
+        _event: unknown,
+        rawPayload: unknown
+      ): Promise<RpcResponseEnvelope> {
+        let input: RpcInput<typeof method>;
+        try {
+          input = decodeInput(rawPayload);
+        } catch (cause) {
+          safelyCall(diagnostics?.onDecodeFailure, {
+            scope: "rpc-request",
+            name: method.name,
+            payload: rawPayload,
+            cause,
+          });
+
+          return toDefectEnvelope(cause, `RPC ${method.name} request decode failed`);
+        }
+
+        let effect: Effect.Effect<
+          RpcOutput<typeof method>,
+          RpcError<typeof method>,
+          R
+        >;
+        try {
+          effect = impl(input);
+        } catch (cause) {
+          return toDefectEnvelope(cause, `RPC ${method.name} implementation threw`);
+        }
+
+        const exit = await runPromiseExit(effect);
+
+        if (Exit.isSuccess(exit)) {
+          try {
+            return {
+              type: "success",
+              data: encodeSuccess(exit.value),
+            };
+          } catch (cause) {
+            reportProtocolError(method.name, exit.value, cause);
+            return toDefectEnvelope(cause, `RPC ${method.name} success encoding failed`);
+          }
+        }
+
+        const failure = Cause.failureOption(exit.cause);
+        if (failure._tag === "Some") {
+          if (!encodeFailure) {
+            return toDefectEnvelope(
+              failure.value,
+              `RPC ${method.name} returned a typed failure, but method declares NoError`
+            );
+          }
+
+          try {
+            return {
+              type: "failure",
+              error: {
+                tag: extractErrorTag(failure.value),
+                data: encodeFailure(failure.value),
+              },
+            };
+          } catch (cause) {
+            reportProtocolError(method.name, failure.value, cause);
+            return toDefectEnvelope(cause, `RPC ${method.name} failure encoding failed`);
+          }
+        }
+
+        const defect = Cause.dieOption(exit.cause);
+        if (defect._tag === "Some") {
+          return toDefectEnvelope(defect.value, `RPC ${method.name} defect`);
+        }
+
+        return toDefectEnvelope(exit.cause, `RPC ${method.name} interrupted`);
       }
+    );
+  }
 
-      const exit = await runPromiseExit(impl(input));
-      return encodeExit(exit);
-    });
-  });
-};
+  let running = false;
+  let disposed = false;
 
-type Envelope<E extends AnyEvent> = {
+  function start(): void {
+    if (disposed) {
+      throw new Error("RPC endpoint has already been disposed.");
+    }
+
+    if (running) {
+      return;
+    }
+
+    for (const [channel, listener] of listeners) {
+      ipc.handle(channel, listener);
+    }
+
+    running = true;
+  }
+
+  function stop(): void {
+    if (!running) {
+      return;
+    }
+
+    for (const channel of listeners.keys()) {
+      ipc.removeHandler(channel);
+    }
+
+    running = false;
+  }
+
+  function dispose(): void {
+    if (disposed) {
+      return;
+    }
+
+    stop();
+    disposed = true;
+  }
+
+  function isRunning(): boolean {
+    return running;
+  }
+
+  return {
+    start,
+    stop,
+    dispose,
+    isRunning,
+  };
+}
+
+type QueueItem<E extends AnyEvent> = {
   readonly event: E;
   readonly payload: RpcEventPayload<E>;
 };
 
-const isImplementation = <M extends AnyMethod, R>(
-  value: unknown
-): value is (
-  input: RpcInput<M>
-) => Effect.Effect<RpcOutput<M>, RpcError<M>, R> => typeof value === "function";
+function clampQueueSize(maxQueueSize: number | undefined): number {
+  if (maxQueueSize === undefined) {
+    return 1000;
+  }
 
-const encodePayload = <E extends AnyEvent>(
-  event: E,
-  payload: RpcEventPayload<E>
-) =>
-  Effect.try({
-    try: () => S.encodeSync(event.payload)(payload),
-    catch: (cause) =>
-      cause instanceof Error ? cause : new Error(String(cause)),
-  });
+  if (!Number.isFinite(maxQueueSize) || maxQueueSize < 1) {
+    throw new Error("Event publisher maxQueueSize must be a positive finite number.");
+  }
 
-const dispatchToRenderer = <E extends AnyEvent>(
-  getWindow: EventBusOptions["getWindow"],
-  channelPrefix: EventBusOptions["channelPrefix"],
-  event: E,
-  encoded: unknown
-) =>
-  Effect.sync(() => {
-    const window = getWindow();
-    if (window && !window.isDestroyed()) {
-      const prefix = resolveChannelPrefix(channelPrefix);
-      window.webContents.send(`${prefix.event}${event.name}`, encoded);
-    }
-  });
+  return Math.floor(maxQueueSize);
+}
 
-export const createEventBus = <
+export function createEventPublisher<
   const Methods extends ReadonlyArray<AnyMethod>,
   const Events extends ReadonlyArray<AnyEvent>
 >(
   _contract: RpcContract<Methods, Events>,
-  options: EventBusOptions
-): RpcEventBus<RpcContract<Methods, Events>> => {
-  const pubsub = Effect.runSync(
-    PubSub.unbounded<Envelope<Events[number]>>()
-  );
+  options: EventPublisherOptions
+): RpcEventPublisher<RpcContract<Methods, Events>> {
+  const channelPrefix = resolveChannelPrefix(options.channelPrefix);
+  const diagnostics = options.diagnostics;
+  const maxQueueSize = clampQueueSize(options.maxQueueSize);
 
-  Effect.runFork(
-    Effect.scoped(
-      Effect.gen(function* () {
-        const dequeue = yield* PubSub.subscribe(pubsub);
-        yield* Stream.fromQueue(dequeue, { shutdown: true }).pipe(
-          Stream.runForEach(({ event, payload }) =>
-            Effect.gen(function* () {
-              const encodeResult = yield* Effect.either(
-                encodePayload(event, payload)
-              );
+  const queue: Array<QueueItem<Events[number]>> = [];
 
-              if (encodeResult._tag === "Left") {
-                return;
-              }
+  let dropped = 0;
+  let running = false;
+  let disposed = false;
+  let draining = false;
+  let drainScheduled = false;
 
-              yield* dispatchToRenderer(
-                options.getWindow,
-                options.channelPrefix,
-                event,
-                encodeResult.right
-              );
-            })
-          )
-        );
-      })
-    ).pipe(
-      Effect.catchAllCause(() => Effect.void),
-      Effect.retry({ times: 3 }),
-      Effect.catchAll(() => Effect.void)
-    )
-  );
+  function scheduleDrain(): void {
+    if (!running || disposed || draining || drainScheduled) {
+      return;
+    }
 
-  const emit = <E extends Events[number]>(
+    drainScheduled = true;
+    queueMicrotask(() => {
+      drainScheduled = false;
+      drain();
+    });
+  }
+
+  function dispatch(item: QueueItem<Events[number]>): void {
+    let encoded: unknown;
+    try {
+      encoded = S.encodeSync(item.event.payload)(item.payload);
+    } catch (cause) {
+      dropped += 1;
+
+      safelyCall(diagnostics?.onDecodeFailure, {
+        scope: "event-payload",
+        name: item.event.name,
+        payload: item.payload,
+        cause,
+      });
+
+      safelyCall(diagnostics?.onDroppedEvent, {
+        event: item.event.name,
+        payload: item.payload,
+        reason: "encoding_failed",
+        queued: queue.length,
+        dropped,
+      });
+
+      return;
+    }
+
+    const window = options.getWindow();
+    if (!window || window.isDestroyed()) {
+      return;
+    }
+
+    try {
+      window.webContents.send(`${channelPrefix.event}${item.event.name}`, encoded);
+    } catch (cause) {
+      safelyCall(diagnostics?.onDispatchFailure, {
+        event: item.event.name,
+        payload: item.payload,
+        cause,
+      });
+    }
+  }
+
+  function drain(): void {
+    if (!running || disposed || draining) {
+      return;
+    }
+
+    draining = true;
+
+    try {
+      while (running && !disposed && queue.length > 0) {
+        const next = queue.shift();
+        if (!next) {
+          continue;
+        }
+
+        dispatch(next);
+      }
+    } finally {
+      draining = false;
+
+      if (running && !disposed && queue.length > 0) {
+        scheduleDrain();
+      }
+    }
+  }
+
+  function enqueue(item: QueueItem<Events[number]>): void {
+    if (queue.length >= maxQueueSize) {
+      const evicted = queue.shift();
+      dropped += 1;
+
+      if (evicted) {
+        safelyCall(diagnostics?.onDroppedEvent, {
+          event: evicted.event.name,
+          payload: evicted.payload,
+          reason: "queue_full",
+          queued: queue.length,
+          dropped,
+        });
+      }
+    }
+
+    queue.push(item);
+    scheduleDrain();
+  }
+
+  function publish<E extends Events[number]>(
     event: E,
     payload: RpcEventPayload<E>
-  ) =>
-    Effect.flatMap(PubSub.publish(pubsub, { event, payload }), () =>
-      Effect.void
-    );
+  ): Effect.Effect<void, never> {
+    return Effect.sync(() => {
+      if (disposed) {
+        return;
+      }
 
-  return { emit };
-};
+      enqueue({ event, payload });
+    });
+  }
+
+  function start(): void {
+    if (disposed) {
+      throw new Error("Event publisher has already been disposed.");
+    }
+
+    if (running) {
+      return;
+    }
+
+    running = true;
+    scheduleDrain();
+  }
+
+  function stop(): void {
+    if (!running) {
+      return;
+    }
+
+    running = false;
+  }
+
+  function dispose(): void {
+    if (disposed) {
+      return;
+    }
+
+    stop();
+    queue.length = 0;
+    disposed = true;
+  }
+
+  function isRunning(): boolean {
+    return running;
+  }
+
+  function stats(): { readonly queued: number; readonly dropped: number } {
+    return {
+      queued: queue.length,
+      dropped,
+    };
+  }
+
+  return {
+    publish,
+    start,
+    stop,
+    dispose,
+    isRunning,
+    stats,
+  };
+}
