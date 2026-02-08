@@ -1,6 +1,5 @@
 import type * as Effect from "effect/Effect";
 import type * as Runtime from "effect/Runtime";
-import type { BrowserWindow } from "electron";
 import type {
   AnyEvent,
   AnyMethod,
@@ -81,44 +80,134 @@ export const defaultChannelPrefix: ChannelPrefix = {
   event: "event/",
 };
 
+export type DecodeFailureScope = "rpc-request" | "rpc-response" | "event-payload";
+
+export type DecodeFailureContext = {
+  readonly scope: DecodeFailureScope;
+  readonly name: string;
+  readonly payload: unknown;
+  readonly cause: unknown;
+};
+
+export type ProtocolErrorContext = {
+  readonly method: string;
+  readonly response: unknown;
+  readonly cause: unknown;
+};
+
+export type DispatchFailureContext = {
+  readonly event: string;
+  readonly payload: unknown;
+  readonly cause: unknown;
+};
+
+export type DroppedEventReason = "queue_full" | "encoding_failed";
+
+export type DroppedEventContext = {
+  readonly event: string;
+  readonly payload: unknown;
+  readonly reason: DroppedEventReason;
+  readonly queued: number;
+  readonly dropped: number;
+};
+
+export type RpcInvoke = (method: string, payload: unknown) => Promise<unknown>;
+
+export type RpcResponseDecodeMode = "envelope" | "dual";
+
+export type RpcClientDiagnostics = {
+  readonly onDecodeFailure?: (context: DecodeFailureContext) => void;
+  readonly onProtocolError?: (context: ProtocolErrorContext) => void;
+};
+
+export type RpcClientOptions = {
+  readonly invoke?: RpcInvoke;
+  readonly diagnostics?: RpcClientDiagnostics;
+  readonly rpcDecodeMode?: RpcResponseDecodeMode;
+};
+
+export type RpcEndpointDiagnostics = {
+  readonly onDecodeFailure?: (context: DecodeFailureContext) => void;
+  readonly onProtocolError?: (context: ProtocolErrorContext) => void;
+};
+
 export type IpcMainLike = {
   readonly handle: (
     channel: string,
     listener: (event: unknown, payload: unknown) => unknown
   ) => unknown;
+  readonly removeHandler: (channel: string) => unknown;
 };
 
-export type RpcInvoke = (method: string, payload: unknown) => Promise<unknown>;
+export interface RpcEndpoint {
+  readonly start: () => void;
+  readonly stop: () => void;
+  readonly dispose: () => void;
+  readonly isRunning: () => boolean;
+}
 
-/** Provide a Runtime when handlers require services (R). */
-export type RpcServerOptions<R = never> = {
+/**
+ * Runtime used to execute handler effects.
+ */
+export type RpcEndpointOptions<R = never> = {
   readonly channelPrefix?: ChannelPrefix;
-  readonly runtime?: Runtime.Runtime<R>;
+  readonly runtime: Runtime.Runtime<R>;
+  readonly diagnostics?: RpcEndpointDiagnostics;
 };
 
-export type RpcClientOptions = {
-  readonly invoke?: RpcInvoke;
+export type EventPublisherDiagnostics = {
+  readonly onDecodeFailure?: (context: DecodeFailureContext) => void;
+  readonly onDispatchFailure?: (context: DispatchFailureContext) => void;
+  readonly onDroppedEvent?: (context: DroppedEventContext) => void;
+};
+
+export type RendererWindowLike = {
+  readonly isDestroyed: () => boolean;
+  readonly webContents: {
+    readonly send: (channel: string, payload: unknown) => void;
+  };
+};
+
+export type EventPublisherOptions = {
   readonly channelPrefix?: ChannelPrefix;
+  readonly getWindow: () => RendererWindowLike | null;
+  readonly maxQueueSize?: number;
+  readonly diagnostics?: EventPublisherDiagnostics;
 };
 
-export type EventBusOptions = {
-  readonly channelPrefix?: ChannelPrefix;
-  readonly getWindow: () => BrowserWindow | null;
-};
-
-export type EventSubscriberOptions = {
-  readonly channelPrefix?: ChannelPrefix;
-  readonly subscribe?: (name: string, handler: (payload: unknown) => void) => () => void;
-};
-
-export interface RpcEventBus<
+export interface RpcEventPublisher<
   C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[]>
 > {
-  readonly emit: <E extends C["events"][number]>(
+  readonly publish: <E extends C["events"][number]>(
     event: E,
     payload: RpcEventPayload<E>
   ) => Effect.Effect<void, never>;
+  readonly start: () => void;
+  readonly stop: () => void;
+  readonly dispose: () => void;
+  readonly isRunning: () => boolean;
+  readonly stats: () => {
+    readonly queued: number;
+    readonly dropped: number;
+  };
 }
+
+export type EventDecodeMode = "safe" | "strict";
+
+export type EventSubscribe = (
+  name: string,
+  handler: (payload: unknown) => void
+) => () => void;
+
+export type EventSubscriberDiagnostics = {
+  readonly onDecodeFailure?: (context: DecodeFailureContext) => void;
+};
+
+export type EventSubscriberOptions = {
+  readonly subscribe?: EventSubscribe;
+  readonly decodeMode?: EventDecodeMode;
+  readonly diagnostics?: EventSubscriberDiagnostics;
+};
 
 export interface EventSubscriber<
   C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[]>
@@ -128,7 +217,8 @@ export interface EventSubscriber<
     handler: (payload: RpcEventPayload<E>) => void
   ) => () => void;
   readonly subscribeByName: (
-    name: C["events"][number]["name"],
+    name: string,
     handler: (payload: unknown) => void
   ) => () => void;
+  readonly dispose: () => void;
 }

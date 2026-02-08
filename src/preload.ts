@@ -1,33 +1,64 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
-import { defaultChannelPrefix, type ChannelPrefix } from "./types.ts";
+import {
+  defaultChannelPrefix,
+  type ChannelPrefix,
+  type EventSubscribe,
+  type RpcInvoke,
+} from "./types.ts";
 
-type Listener = (payload: unknown) => void;
+export type BridgeAdapters = {
+  readonly invoke: RpcInvoke;
+  readonly subscribe: EventSubscribe;
+};
 
-type BridgeOptions = {
-  readonly rpcGlobal?: string;
-  readonly eventsGlobal?: string;
+export type BridgeAdaptersOptions = {
   readonly channelPrefix?: ChannelPrefix;
 };
 
-export const exposeRpcBridge = (options?: BridgeOptions): void => {
-  const rpcGlobal = options?.rpcGlobal ?? "rpc";
-  const eventsGlobal = options?.eventsGlobal ?? "events";
+export type BridgeExposureOptions = BridgeAdaptersOptions & {
+  readonly rpcGlobal?: string;
+  readonly eventsGlobal?: string;
+};
+
+export function createBridgeAdapters(
+  options?: BridgeAdaptersOptions
+): BridgeAdapters {
   const channelPrefix = options?.channelPrefix ?? defaultChannelPrefix;
 
-  const invoke = (method: string, payload: unknown): Promise<unknown> =>
+  const invoke: RpcInvoke = (method: string, payload: unknown) =>
     ipcRenderer.invoke(`${channelPrefix.rpc}${method}`, payload);
 
-  const subscribe = (event: string, listener: Listener): (() => void) => {
+  const subscribe: EventSubscribe = (event, listener) => {
     const wrapped = (_event: IpcRendererEvent, payload: unknown) =>
       listener(payload);
 
-    ipcRenderer.on(`${channelPrefix.event}${event}`, wrapped);
+    const channel = `${channelPrefix.event}${event}`;
+    ipcRenderer.on(channel, wrapped);
 
     return () => {
-      ipcRenderer.removeListener(`${channelPrefix.event}${event}`, wrapped);
+      ipcRenderer.removeListener(channel, wrapped);
     };
   };
 
-  contextBridge.exposeInMainWorld(rpcGlobal, { invoke });
-  contextBridge.exposeInMainWorld(eventsGlobal, { subscribe });
-};
+  return {
+    invoke,
+    subscribe,
+  };
+}
+
+export function exposeRpcBridge(options?: BridgeExposureOptions): void {
+  const rpcGlobal = options?.rpcGlobal ?? "rpc";
+  const eventsGlobal = options?.eventsGlobal ?? "events";
+
+  const adapters = createBridgeAdapters({
+    channelPrefix: options?.channelPrefix,
+  });
+
+  contextBridge.exposeInMainWorld(rpcGlobal, {
+    invoke: adapters.invoke,
+  });
+
+  contextBridge.exposeInMainWorld(eventsGlobal, {
+    subscribe: adapters.subscribe,
+  });
+}
