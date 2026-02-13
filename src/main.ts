@@ -215,11 +215,21 @@ export function createRpcEndpoint<
       return;
     }
 
+    let firstError: unknown;
+
     for (const channel of listeners.keys()) {
-      ipc.removeHandler(channel);
+      try {
+        ipc.removeHandler(channel);
+      } catch (cause) {
+        firstError ??= cause;
+      }
     }
 
     running = false;
+
+    if (firstError !== undefined) {
+      throw firstError;
+    }
   }
 
   function dispose(): void {
@@ -227,8 +237,19 @@ export function createRpcEndpoint<
       return;
     }
 
-    stop();
+    let stopError: unknown;
+
+    try {
+      stop();
+    } catch (cause) {
+      stopError = cause;
+    }
+
     disposed = true;
+
+    if (stopError !== undefined) {
+      throw stopError;
+    }
   }
 
   function isRunning(): boolean {
@@ -334,10 +355,20 @@ export function createEventPublisher<
     try {
       window.webContents.send(`${channelPrefix.event}${item.event.name}`, encoded);
     } catch (cause) {
+      dropped += 1;
+
       safelyCall(diagnostics?.onDispatchFailure, {
         event: item.event.name,
         payload: item.payload,
         cause,
+      });
+
+      safelyCall(diagnostics?.onDroppedEvent, {
+        event: item.event.name,
+        payload: item.payload,
+        reason: "dispatch_failed",
+        queued: queue.length,
+        dropped,
       });
     }
   }

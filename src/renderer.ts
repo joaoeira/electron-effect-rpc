@@ -107,7 +107,21 @@ export function createRpcClient<
       );
     }
 
-    const raw = await invoke(method.name, encoded);
+    let raw: unknown;
+    try {
+      raw = await invoke(method.name, encoded);
+    } catch (cause) {
+      safelyCall(diagnostics?.onProtocolError, {
+        method: method.name,
+        response: undefined,
+        cause,
+      });
+
+      throw new RpcDefectError(
+        `RPC ${method.name} invoke failed: ${formatUnknown(cause)}`,
+        cause
+      );
+    }
 
     const envelope = parseRpcResponseEnvelope(raw);
     if (envelope) {
@@ -298,11 +312,21 @@ export function createEventSubscriber<
   };
 
   function dispose(): void {
+    let firstError: unknown;
+
     for (const unsubscribe of subscriptions) {
-      unsubscribe();
+      try {
+        unsubscribe();
+      } catch (cause) {
+        firstError ??= cause;
+      }
     }
 
     subscriptions.clear();
+
+    if (firstError !== undefined) {
+      throw firstError;
+    }
   }
 
   return {

@@ -177,6 +177,37 @@ describe("createRpcClient", () => {
     expect(protocolErrors.length).toBe(1);
   });
 
+  it("reports invoke rejections as protocol defects", async () => {
+    const protocolErrors: unknown[] = [];
+    const invoke = createInvokeStub(async () => {
+      throw new Error("ipc invoke failed");
+    });
+
+    const client = createRpcClient(contract, {
+      invoke,
+      diagnostics: {
+        onProtocolError: (context) => {
+          protocolErrors.push(context);
+        },
+      },
+    });
+
+    let thrown: unknown;
+    try {
+      await client.Add({ a: 1, b: 2 });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(RpcDefectError);
+    if (thrown instanceof RpcDefectError) {
+      expect(thrown.message).toContain("invoke failed");
+      expect(thrown.cause).toBeInstanceOf(Error);
+    }
+
+    expect(protocolErrors.length).toBe(1);
+  });
+
   it("supports legacy Exit response decoding in dual mode", async () => {
     const encodeLegacyExit = S.encodeUnknownSync(exitSchemaFor(Add));
 

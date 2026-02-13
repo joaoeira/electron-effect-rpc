@@ -99,6 +99,30 @@ describe("createEventSubscriber", () => {
     subscriber.dispose();
     expect(unsubscribeCalls).toBe(2);
   });
+
+  it("dispose attempts all unsubscribes even if one throws", () => {
+    const calls: string[] = [];
+    const unsubscribes = [
+      () => {
+        calls.push("first");
+        throw new Error("first unsubscribe failed");
+      },
+      () => {
+        calls.push("second");
+      },
+    ];
+
+    let index = 0;
+    const subscriber = createEventSubscriber(contract, {
+      subscribe: () => unsubscribes[index++] ?? (() => {}),
+    });
+
+    subscriber.subscribe(Progress, () => {});
+    subscriber.subscribeByName("Progress", () => {});
+
+    expect(() => subscriber.dispose()).toThrow(/first unsubscribe failed/);
+    expect(calls).toEqual(["first", "second"]);
+  });
 });
 
 describe("createEventPublisher", () => {
@@ -234,6 +258,7 @@ describe("createEventPublisher", () => {
 
   it("keeps draining after dispatch failures", async () => {
     const dispatchFailures: unknown[] = [];
+    const dropped: unknown[] = [];
     const sent: Array<{ channel: string; payload: unknown }> = [];
 
     let attempt = 0;
@@ -257,6 +282,9 @@ describe("createEventPublisher", () => {
         onDispatchFailure: (context) => {
           dispatchFailures.push(context);
         },
+        onDroppedEvent: (context) => {
+          dropped.push(context);
+        },
       },
     });
 
@@ -268,6 +296,16 @@ describe("createEventPublisher", () => {
     await waitFor(() => sent.length === 1);
 
     expect(dispatchFailures.length).toBe(1);
+    expect(dropped).toEqual([
+      {
+        event: "Progress",
+        payload: { value: 1 },
+        reason: "dispatch_failed",
+        queued: 0,
+        dropped: 1,
+      },
+    ]);
+    expect(publisher.stats()).toEqual({ queued: 0, dropped: 1 });
     expect(sent[0]?.payload).toEqual({ value: 2 });
   });
 

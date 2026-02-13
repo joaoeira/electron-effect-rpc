@@ -241,4 +241,53 @@ describe("createRpcEndpoint", () => {
     endpoint.stop();
     expect(handlers.size).toBe(0);
   });
+
+  it("marks endpoint as stopped even if removeHandler throws", () => {
+    const removals: string[] = [];
+    const throwsOn = new Set<string>(["rpc/Add"]);
+
+    const ipcMain: IpcMainLike = {
+      handle: () => {},
+      removeHandler: (channel) => {
+        removals.push(channel);
+        if (throwsOn.has(channel)) {
+          throw new Error(`remove failed for ${channel}`);
+        }
+      },
+    };
+
+    const endpoint = createRpcEndpoint(contract, ipcMain, {
+      Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
+      Fail: () => Effect.fail(new DomainError({ message: "denied" })),
+    }, {
+      runtime: Runtime.defaultRuntime,
+    });
+
+    endpoint.start();
+    expect(endpoint.isRunning()).toBe(true);
+
+    expect(() => endpoint.stop()).toThrow(/remove failed for rpc\/Add/);
+    expect(endpoint.isRunning()).toBe(false);
+    expect(removals).toEqual(expect.arrayContaining(["rpc/Add", "rpc/Fail"]));
+  });
+
+  it("finalizes disposal even if stop throws", () => {
+    const ipcMain: IpcMainLike = {
+      handle: () => {},
+      removeHandler: () => {
+        throw new Error("remove failed");
+      },
+    };
+
+    const endpoint = createRpcEndpoint(contract, ipcMain, {
+      Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
+      Fail: () => Effect.fail(new DomainError({ message: "denied" })),
+    }, {
+      runtime: Runtime.defaultRuntime,
+    });
+
+    endpoint.start();
+    expect(() => endpoint.dispose()).toThrow(/remove failed/);
+    expect(() => endpoint.start()).toThrow(/disposed/i);
+  });
 });

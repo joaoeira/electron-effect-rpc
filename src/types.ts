@@ -104,7 +104,8 @@ export type DispatchFailureContext = {
 export type DroppedEventReason =
   | "queue_full"
   | "encoding_failed"
-  | "window_unavailable";
+  | "window_unavailable"
+  | "dispatch_failed";
 
 export type DroppedEventContext = {
   readonly event: string;
