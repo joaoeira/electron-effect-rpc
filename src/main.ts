@@ -188,8 +188,23 @@ export function createRpcEndpoint<
       return;
     }
 
-    for (const [channel, listener] of listeners) {
-      ipc.handle(channel, listener);
+    const registeredChannels: string[] = [];
+
+    try {
+      for (const [channel, listener] of listeners) {
+        ipc.handle(channel, listener);
+        registeredChannels.push(channel);
+      }
+    } catch (cause) {
+      for (const channel of registeredChannels) {
+        try {
+          ipc.removeHandler(channel);
+        } catch {
+          // Best-effort rollback: avoid leaving partial registration behind.
+        }
+      }
+
+      throw cause;
     }
 
     running = true;
@@ -303,6 +318,16 @@ export function createEventPublisher<
 
     const window = options.getWindow();
     if (!window || window.isDestroyed()) {
+      dropped += 1;
+
+      safelyCall(diagnostics?.onDroppedEvent, {
+        event: item.event.name,
+        payload: item.payload,
+        reason: "window_unavailable",
+        queued: queue.length,
+        dropped,
+      });
+
       return;
     }
 

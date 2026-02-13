@@ -101,7 +101,10 @@ export type DispatchFailureContext = {
   readonly cause: unknown;
 };
 
-export type DroppedEventReason = "queue_full" | "encoding_failed";
+export type DroppedEventReason =
+  | "queue_full"
+  | "encoding_failed"
+  | "window_unavailable";
 
 export type DroppedEventContext = {
   readonly event: string;

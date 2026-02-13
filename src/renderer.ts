@@ -188,10 +188,15 @@ export function createRpcClient<
   const clientRecord: Record<string, unknown> = client;
 
   for (const method of contract.methods) {
+    const decodeDefaultInput = S.decodeUnknownSync(method.req);
+
     const caller: RpcCaller<typeof method> = (
-      input?: RpcInput<typeof method>
+      ...args: [RpcInput<typeof method>?]
     ) => {
-      const payload = input ?? S.decodeUnknownSync(method.req)({});
+      const payload =
+        args.length === 0
+          ? decodeDefaultInput({})
+          : (args[0] as RpcInput<typeof method>);
       return call(method, payload);
     };
 

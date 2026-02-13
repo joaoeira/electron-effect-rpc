@@ -210,4 +210,35 @@ describe("createRpcEndpoint", () => {
 
     expect(() => endpoint.start()).toThrow(/disposed/i);
   });
+
+  it("cleans up already-registered handlers when start fails mid-registration", () => {
+    const handlers = new Map<string, (event: unknown, payload: unknown) => unknown>();
+
+    const ipcMain: IpcMainLike = {
+      handle: (channel, listener) => {
+        if (channel === "rpc/Fail") {
+          throw new Error("duplicate channel");
+        }
+
+        handlers.set(channel, listener);
+      },
+      removeHandler: (channel) => {
+        handlers.delete(channel);
+      },
+    };
+
+    const endpoint = createRpcEndpoint(contract, ipcMain, {
+      Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
+      Fail: () => Effect.fail(new DomainError({ message: "denied" })),
+    }, {
+      runtime: Runtime.defaultRuntime,
+    });
+
+    expect(() => endpoint.start()).toThrow(/duplicate channel/);
+    expect(endpoint.isRunning()).toBe(false);
+    expect(handlers.size).toBe(0);
+
+    endpoint.stop();
+    expect(handlers.size).toBe(0);
+  });
 });

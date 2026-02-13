@@ -204,6 +204,34 @@ describe("createEventPublisher", () => {
     ]);
   });
 
+  it("records drops when no renderer window is available during dispatch", async () => {
+    const dropped: unknown[] = [];
+
+    const publisher = createEventPublisher(contract, {
+      getWindow: () => null,
+      diagnostics: {
+        onDroppedEvent: (context) => {
+          dropped.push(context);
+        },
+      },
+    });
+
+    publisher.start();
+    await Effect.runPromise(publisher.publish(Progress, { value: 1 }));
+    await waitFor(() => publisher.stats().dropped === 1);
+
+    expect(publisher.stats()).toEqual({ queued: 0, dropped: 1 });
+    expect(dropped).toEqual([
+      {
+        event: "Progress",
+        payload: { value: 1 },
+        reason: "window_unavailable",
+        queued: 0,
+        dropped: 1,
+      },
+    ]);
+  });
+
   it("keeps draining after dispatch failures", async () => {
     const dispatchFailures: unknown[] = [];
     const sent: Array<{ channel: string; payload: unknown }> = [];

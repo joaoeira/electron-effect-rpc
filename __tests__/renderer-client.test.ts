@@ -75,6 +75,30 @@ describe("createRpcClient", () => {
     ]);
   });
 
+  it("preserves explicit null inputs instead of replacing them with empty objects", async () => {
+    const AcceptNull = rpc("AcceptNull", S.Null, S.Struct({ ok: S.Boolean }));
+    const nullContract = defineContract({
+      methods: [AcceptNull] as const,
+      events: [] as const,
+    });
+
+    const invoke = createInvokeStub(async (_method, payload) => ({
+      type: "success",
+      data: { ok: payload === null },
+    }));
+
+    const client = createRpcClient(nullContract, { invoke });
+    const result = await client.AcceptNull(null);
+
+    expect(result).toEqual({ ok: true });
+    expect(invoke.invocations).toEqual([
+      {
+        method: "AcceptNull",
+        payload: null,
+      },
+    ]);
+  });
+
   it("throws typed failures from failure envelopes", async () => {
     const invoke = createInvokeStub(async () => ({
       type: "failure",
