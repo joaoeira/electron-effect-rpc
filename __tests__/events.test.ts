@@ -25,7 +25,12 @@ describe("createEventSubscriber", () => {
   });
 
   it("when event subscriber is created without subscribe, then creation throws", () => {
-    expect(() => createEventSubscriber(contract)).toThrow(
+    const createWithoutOptions = createEventSubscriber as unknown as (
+      c: typeof contract,
+      options?: unknown
+    ) => unknown;
+
+    expect(() => createWithoutOptions(contract)).toThrow(
       /EventSubscriberOptions.subscribe is required/
     );
   });

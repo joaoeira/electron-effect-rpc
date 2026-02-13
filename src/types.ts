@@ -129,7 +129,7 @@ export type RpcClientDiagnostics = {
 };
 
 export type RpcClientOptions = {
-  readonly invoke?: RpcInvoke;
+  readonly invoke: RpcInvoke;
   readonly diagnostics?: RpcClientDiagnostics;
   readonly rpcDecodeMode?: RpcResponseDecodeMode;
 };
@@ -212,7 +212,7 @@ export type EventSubscriberDiagnostics = {
 };
 
 export type EventSubscriberOptions = {
-  readonly subscribe?: EventSubscribe;
+  readonly subscribe: EventSubscribe;
   readonly decodeMode?: EventDecodeMode;
   readonly diagnostics?: EventSubscriberDiagnostics;
 };
@@ -230,3 +230,11 @@ export interface EventSubscriber<
   ) => () => void;
   readonly dispose: () => void;
 }
+
+export type {
+  IpcBridge,
+  IpcBridgeGlobal,
+  IpcKit,
+  IpcKitOptions,
+  IpcMainHandle,
+} from "./kit.ts";

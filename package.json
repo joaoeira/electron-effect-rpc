@@ -4,6 +4,10 @@
   "description": "Typed IPC RPC for Electron, built on Effect and @effect/schema",
   "type": "module",
   "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
     "./main": {
       "types": "./dist/main.d.ts",
       "default": "./dist/main.js"

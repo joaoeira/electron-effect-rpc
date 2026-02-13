@@ -81,7 +81,7 @@ export function createRpcClient<
   const Events extends ReadonlyArray<AnyEvent>
 >(
   contract: RpcContract<Methods, Events>,
-  options?: RpcClientOptions
+  options: RpcClientOptions
 ): RpcClient<RpcContract<Methods, Events>> {
   const invoke = requireInvoke(options);
   const diagnostics = options?.diagnostics;
@@ -244,7 +244,7 @@ export function createEventSubscriber<
   const Events extends ReadonlyArray<AnyEvent>
 >(
   contract: RpcContract<Methods, Events>,
-  options?: EventSubscriberOptions
+  options: EventSubscriberOptions
 ): EventSubscriber<RpcContract<Methods, Events>> {
   const subscribe = requireSubscribe(options);
   const mode = options?.decodeMode ?? "safe";

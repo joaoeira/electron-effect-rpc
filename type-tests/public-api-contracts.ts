@@ -1,9 +1,23 @@
 import * as S from "@effect/schema/Schema";
 import { Effect } from "effect";
 import { defineContract, event, rpc, type RpcError } from "../src/contract.ts";
+import {
+  NoError as RootNoError,
+  createIpcKit,
+  defineContract as defineContractRoot,
+  event as eventRoot,
+  rpc as rpcRoot,
+} from "../src/index.ts";
 import { createEventPublisher } from "../src/main.ts";
 import { createEventSubscriber, createRpcClient } from "../src/renderer.ts";
 import type { Implementations, RpcClient } from "../src/types.ts";
+import type {
+  IpcBridge,
+  IpcBridgeGlobal,
+  IpcKit,
+  IpcKitOptions,
+  IpcMainHandle,
+} from "../src/index.ts";
 
 class AccessDeniedError extends S.TaggedError<AccessDeniedError>()(
   "AccessDeniedError",
@@ -27,6 +41,15 @@ const contract = defineContract({
 const invoke = async (_method: string, _payload: unknown) =>
   ({ type: "success", data: "ok" }) as const;
 const client = createRpcClient(contract, { invoke });
+
+const RootPing = rpcRoot("RootPing", S.Struct({}), S.Struct({ ok: S.Boolean }));
+const rootContract = defineContractRoot({
+  methods: [RootPing] as const,
+  events: [] as const,
+});
+const rootKit = createIpcKit({ contract: rootContract });
+void rootKit;
+void RootNoError;
 
 // rpcCaller_zero_arg_only_for_empty_object_requests
 client.EmptyReq();
@@ -116,3 +139,17 @@ type _WithErrIsNotNever = Assert<
 >;
 void (0 as unknown as _NoErrIsNever);
 void (0 as unknown as _WithErrIsNotNever);
+
+type _RootSmokeTypes = {
+  bridge: IpcBridge;
+  bridgeGlobal: IpcBridgeGlobal<"api">;
+  kit: IpcKit<typeof rootContract>;
+  kitOptions: IpcKitOptions<typeof rootContract>;
+  mainHandle: IpcMainHandle<typeof rootContract>;
+};
+void (0 as unknown as _RootSmokeTypes);
+void eventRoot;
+
+type RootModule = typeof import("../src/index.ts");
+// @ts-expect-error Low-level factories stay subpath-only.
+type _NoCreateRpcClientFromRoot = RootModule["createRpcClient"];

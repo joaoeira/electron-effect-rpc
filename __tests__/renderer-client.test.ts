@@ -34,7 +34,12 @@ describe("createRpcClient", () => {
   });
 
   it("when rpc client is created without an invoke function, then creation throws", () => {
-    expect(() => createRpcClient(contract)).toThrow(
+    const createWithoutOptions = createRpcClient as unknown as (
+      c: typeof contract,
+      options?: unknown
+    ) => unknown;
+
+    expect(() => createWithoutOptions(contract)).toThrow(
       /RpcClientOptions.invoke is required/
     );
   });

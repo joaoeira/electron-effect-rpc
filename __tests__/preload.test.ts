@@ -36,7 +36,7 @@ const electronModule = {
 
 mock.module("electron", () => electronModule);
 
-const { createBridgeAdapters, exposeRpcBridge } = await import("../src/preload.ts");
+const { createBridgeAdapters, exposeIpcBridge, exposeRpcBridge } = await import("../src/preload.ts");
 
 describe("preload bridge", () => {
   beforeEach(() => {
@@ -161,5 +161,40 @@ describe("preload bridge", () => {
     expect(invokeCalls).toEqual([{ channel: "rpc-x/Method", payload: { v: 1 } }]);
     expect(onCalls[0]?.channel).toBe("evt-x/Progress");
     expect(removeCalls[0]?.channel).toBe("evt-x/Progress");
+  });
+
+  it("when exposeIpcBridge is called with defaults, then a single api global is exposed", () => {
+    exposeIpcBridge();
+
+    expect(Object.keys(exposedGlobals)).toEqual(["api"]);
+    expect(typeof exposedGlobals.api?.invoke).toBe("function");
+    expect(typeof exposedGlobals.api?.subscribe).toBe("function");
+  });
+
+  it("when exposeIpcBridge receives custom global and prefix, then invoke and subscribe use those values", async () => {
+    exposeIpcBridge({
+      global: "bridge",
+      channelPrefix: { rpc: "rpc-z/", event: "evt-z/" },
+    });
+
+    const api = exposedGlobals.bridge;
+    const invoke = api?.invoke as
+      | ((method: string, payload: unknown) => Promise<unknown>)
+      | undefined;
+    const subscribe = api?.subscribe as
+      | ((name: string, listener: (payload: unknown) => void) => () => void)
+      | undefined;
+
+    if (!invoke || !subscribe) {
+      throw new Error("expected exposed bridge global");
+    }
+
+    await invoke("Method", { ok: true });
+    const unsubscribe = subscribe("Progress", () => {});
+    unsubscribe();
+
+    expect(invokeCalls).toEqual([{ channel: "rpc-z/Method", payload: { ok: true } }]);
+    expect(onCalls[0]?.channel).toBe("evt-z/Progress");
+    expect(removeCalls[0]?.channel).toBe("evt-z/Progress");
   });
 });

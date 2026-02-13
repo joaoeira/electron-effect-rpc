@@ -1,24 +1,26 @@
 # electron-effect-rpc
 
-Typed IPC RPC for Electron, built on Effect and @effect/schema. This library
-lets you define a shared contract, generate a typed RPC client in the renderer,
-register handlers in the main process, and stream typed events across processes.
+Typed IPC RPC for Electron, built on Effect and @effect/schema.
 
-This package is ESM-only. It targets modern Electron runtimes (current project
-uses Electron 38) and assumes ESM-capable bundling.
+The ergonomic default is now a single shared `createIpcKit` configuration that
+you reuse in main, preload, and renderer code. Low-level subpath APIs still
+exist and remain fully supported.
+
+This package is ESM-only. It targets modern Electron runtimes and assumes an
+ESM-capable build pipeline.
 
 ## Features
 - Single shared contract for methods and events.
-- End-to-end type safety using @effect/schema.
-- Promise-based renderer client with typed errors.
-- Effect-based main handlers with explicit runtime injection.
-- Explicit lifecycle handles for main-process RPC and event publishing.
-- Bounded event queue with drop-oldest backpressure.
+- Single shared kit config to eliminate cross-process prefix drift.
+- End-to-end schema validation at IPC boundaries.
+- Promise-based renderer RPC with typed domain errors.
+- Effect-native main handlers with explicit runtime injection.
+- Explicit lifecycle handles and bounded event queue backpressure.
 - Structured diagnostics hooks for decode/protocol/dispatch failures.
 
 ## Requirements
 - Electron with context isolation enabled.
-- ESM-capable build pipeline.
+- ESM-capable bundling.
 - Peer dependencies: `effect`, `@effect/schema`, `electron`.
 
 ## Installation
@@ -26,40 +28,12 @@ uses Electron 38) and assumes ESM-capable bundling.
 bun add electron-effect-rpc effect @effect/schema
 ```
 
-If you are in a monorepo workspace, add the dependency to the target package
-and let the workspace resolver handle the rest.
+## Quickstart (Kit-First)
 
-## Tutorials
-
-If you are adopting this package for the first time, start with the guided docs:
-
-- [Tutorial Index](./docs/tutorials/README.md)
-- [First RPC: Main + Preload + Renderer](./docs/tutorials/01-first-rpc.md)
-- [Typed Errors, Defects, and Diagnostics](./docs/tutorials/02-typed-errors-defects-diagnostics.md)
-- [Events, Lifecycle, and Backpressure](./docs/tutorials/03-events-lifecycle-backpressure.md)
-
-## Core Concepts
-
-### Communication directions
-
-This library provides two communication patterns for Electron IPC:
-
-| Direction | Mechanism | Pattern | Use case |
-|-----------|-----------|---------|----------|
-| **Renderer → Main** | RPC methods | Request/response | Fetching data, triggering actions, calling main process APIs |
-| **Main → Renderer** | Event bus | Push/broadcast | Progress updates, state changes, background task notifications |
-
-**RPC methods** are for when the renderer needs something from the main process. The renderer calls a method and awaits a typed response.
-
-**Events** are for when the main process needs to notify the renderer. The main process emits events whenever it wants, and the renderer subscribes to receive them.
-
-### Defining methods and events
-
-Define methods and events using schema-based helpers:
-
+### 1) Define contract and kit once
 ```ts
 import * as S from "@effect/schema/Schema";
-import { defineContract, event, rpc } from "electron-effect-rpc/contract";
+import { createIpcKit, defineContract, event, rpc } from "electron-effect-rpc";
 
 export const GetAppVersion = rpc(
   "GetAppVersion",
@@ -76,218 +50,121 @@ export const WorkUnitProgress = event(
   })
 );
 
-const methods = [GetAppVersion] as const;
-const events = [WorkUnitProgress] as const;
+const contract = defineContract({
+  methods: [GetAppVersion] as const,
+  events: [WorkUnitProgress] as const,
+});
 
-export const contract = defineContract({ methods, events });
+export const ipc = createIpcKit({
+  contract,
+  channelPrefix: { rpc: "rpc/", event: "event/" },
+  bridge: { global: "api" },
+  decode: { rpc: "envelope", events: "safe" },
+});
 ```
 
-### Errors
-Error schemas should be `Schema.TaggedError` classes. If a method does not
-declare an error schema, it uses `NoError` and the error channel is `never`.
-
-```ts
-import * as S from "@effect/schema/Schema";
-import { rpc } from "electron-effect-rpc/contract";
-
-export class FileReadError extends S.TaggedError<FileReadError>()("FileReadError", {
-  message: S.String,
-  path: S.String,
-}) {}
-
-export const ReadTextFile = rpc(
-  "ReadTextFile",
-  S.Struct({ path: S.String }),
-  S.Struct({ content: S.String }),
-  FileReadError
-);
-```
-
-## Usage
-
-### Main process: register handlers
+### 2) Main process
 ```ts
 import { app, ipcMain } from "electron";
 import { Effect } from "effect";
 import * as Runtime from "effect/Runtime";
-import { createRpcEndpoint, createEventPublisher } from "electron-effect-rpc/main";
-import { contract, WorkUnitProgress } from "./contract.ts";
+import { ipc, WorkUnitProgress } from "./shared-ipc.ts";
 
-const implementations = {
-  GetAppVersion: () => Effect.succeed({ version: app.getVersion() }),
-};
-
-const endpoint = createRpcEndpoint(contract, ipcMain, implementations, {
+const mainRpc = ipc.main({
+  ipcMain,
+  handlers: {
+    GetAppVersion: () => Effect.succeed({ version: app.getVersion() }),
+  },
   runtime: Runtime.defaultRuntime,
-});
-endpoint.start();
-
-const publisher = createEventPublisher(contract, {
   getWindow: () => mainWindow,
 });
-publisher.start();
 
-publisher.publish(WorkUnitProgress, {
+mainRpc.start();
+
+void mainRpc.emit(WorkUnitProgress, {
   requestId: "req-1",
-  chunk: "working...",
+  chunk: "starting",
   done: false,
 });
+
+// Effect-native alternative:
+// void Effect.runPromise(mainRpc.publish(WorkUnitProgress, {...}));
 ```
 
-Pass the runtime used to execute handler effects:
-
+### 3) Preload
 ```ts
-import * as Runtime from "effect/Runtime";
-import { createRpcEndpoint } from "electron-effect-rpc/main";
-import { contract } from "./contract.ts";
+import { ipc } from "./shared-ipc.ts";
 
-const endpoint = createRpcEndpoint(contract, ipcMain, implementations, {
-  runtime: Runtime.defaultRuntime,
-});
-
-endpoint.start();
+ipc.preload().expose();
 ```
 
-### Preload: expose bridge globals
+This exposes one global by default: `window.api`.
+
+### 4) Renderer
 ```ts
-import { exposeRpcBridge } from "electron-effect-rpc/preload";
+import { ipc, WorkUnitProgress } from "./shared-ipc.ts";
 
-exposeRpcBridge();
-```
-
-Defaults:
-- RPC global: `window.rpc.invoke(method, payload)`
-- Events global: `window.events.subscribe(name, handler)`
-- Channel prefix: `rpc/` and `event/`
-
-You can override globals and prefixes:
-```ts
-exposeRpcBridge({
-  rpcGlobal: "rpcApi",
-  eventsGlobal: "rpcEvents",
-  channelPrefix: { rpc: "rpc/", event: "events/" },
-});
-```
-
-Or use low-level bridge adapters for custom exposure:
-```ts
-import { createBridgeAdapters } from "electron-effect-rpc/preload";
-
-const bridge = createBridgeAdapters();
-// bridge.invoke(method, payload)
-// bridge.subscribe(name, handler)
-```
-
-### Renderer: create client and subscriber
-```ts
-import { createRpcClient, createEventSubscriber } from "electron-effect-rpc/renderer";
-import { contract, WorkUnitProgress } from "./contract.ts";
-
-const client = createRpcClient(contract, { invoke: window.rpc.invoke });
-const events = createEventSubscriber(contract, {
-  subscribe: window.events.subscribe,
-  decodeMode: "safe", // default
-});
-
+const { client, events } = ipc.renderer(window.api);
 const { version } = await client.GetAppVersion();
 
-events.subscribe(WorkUnitProgress, (payload) => {
+const unsubscribe = events.subscribe(WorkUnitProgress, (payload) => {
   console.log(payload.chunk);
 });
+
+// later
+unsubscribe();
+events.dispose();
 ```
 
-### Window type augmentation
-If you expose globals in preload, add a local `globals.d.ts`:
-
+### 5) Window typing
 ```ts
 declare global {
   interface Window {
-    rpc: {
+    api: {
       invoke: (method: string, payload: unknown) => Promise<unknown>;
-    };
-    events: {
       subscribe: (name: string, handler: (payload: unknown) => void) => () => void;
     };
   }
 }
 ```
 
-## Testing
+## Error Model
 
-### Renderer client tests
-Use the testing helpers to stub invoke behavior:
+Domain failures are modeled with tagged error schemas and are re-thrown in the
+renderer as those same error classes. Unexpected failures, transport defects,
+and protocol mismatches are surfaced as `RpcDefectError`.
 
-```ts
-import { createRpcClient } from "electron-effect-rpc/renderer";
-import { createInvokeStub } from "electron-effect-rpc/testing";
-import { contract } from "./contract.ts";
+## Low-Level APIs (Still Supported)
 
-const invoke = createInvokeStub(async (method, payload) => {
-  return {
-    type: "success",
-    data: { version: "1.0.0" },
-  };
-});
-
-const client = createRpcClient(contract, { invoke });
-await client.GetAppVersion();
-
-expect(invoke.invocations).toEqual([
-  { method: "GetAppVersion", payload: {} },
-]);
-```
-
-### Main process tests
-You can stub `IpcMainLike` and collect registered handlers:
-
-```ts
-import * as Runtime from "effect/Runtime";
-import { createRpcEndpoint } from "electron-effect-rpc/main";
-import type { IpcMainLike } from "electron-effect-rpc/types";
-import { contract } from "./contract.ts";
-
-const handlers = new Map<string, (event: unknown, payload: unknown) => unknown>();
-const ipcMainStub: IpcMainLike = {
-  handle: (channel, handler) => {
-    handlers.set(channel, handler);
-  },
-  removeHandler: (channel) => {
-    handlers.delete(channel);
-  },
-};
-
-const endpoint = createRpcEndpoint(contract, ipcMainStub, implementations, {
-  runtime: Runtime.defaultRuntime,
-});
-endpoint.start();
-```
-
-## Error Handling
-- If a handler fails with a typed domain error, the renderer client rejects
-  with that error instance.
-- If a handler dies or throws a defect, the renderer client rejects with
-  `RpcDefectError`.
-
-## API Surface
-
-Entry points:
+If you need direct control, keep using subpath entry points:
 - `electron-effect-rpc/contract`
-  - `rpc`, `event`, `defineContract`, `exitSchemaFor`, `SchemaNoContext`, `NoError`
-- `electron-effect-rpc/types`
-  - Type aliases such as `Implementations`, `RpcClient`, `RpcEventPublisher`, `IpcMainLike`
 - `electron-effect-rpc/main`
-  - `createRpcEndpoint`, `createEventPublisher`
 - `electron-effect-rpc/renderer`
-  - `createRpcClient`, `createEventSubscriber`, `RpcDefectError`
 - `electron-effect-rpc/preload`
-  - `exposeRpcBridge`, `createBridgeAdapters`
+- `electron-effect-rpc/types`
 - `electron-effect-rpc/testing`
-  - `createInvokeStub`, `createDeferred`
+
+## Root API Surface
+
+The root entry point exports:
+- `createIpcKit`
+- `rpc`, `event`, `defineContract`, `NoError`
+- Types: `IpcKit`, `IpcKitOptions`, `IpcMainHandle`, `IpcBridge`, `IpcBridgeGlobal`
+
+Low-level factories like `createRpcClient` remain subpath-only by design.
+
+## Tutorials
+
+For deeper walkthroughs and production guidance:
+- [Tutorial Index](./docs/tutorials/README.md)
+- [First RPC: Main + Preload + Renderer](./docs/tutorials/01-first-rpc.md)
+- [Typed Errors, Defects, and Diagnostics](./docs/tutorials/02-typed-errors-defects-diagnostics.md)
+- [Events, Lifecycle, and Backpressure](./docs/tutorials/03-events-lifecycle-backpressure.md)
 
 ## Conventions
 - Relative imports use `.ts` extensions.
 - Package imports are extensionless.
-- No `index.ts` barrel files.
+- No `index.ts` barrel files in subpath modules.
 
 ## License
 MIT

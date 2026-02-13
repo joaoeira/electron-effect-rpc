@@ -21,9 +21,14 @@ trap cleanup EXIT
 
 tar -xzf "$PACK_FILE" -C "$TMP_DIR"
 
+echo "root_entrypoint_importable_in_plain_node"
+node --input-type=module -e "const mod = await import('$TMP_DIR/package/dist/index.js'); if (typeof mod.createIpcKit !== 'function') { throw new Error('createIpcKit export missing'); }"
+
 cat > "$TMP_DIR/smoke.ts" <<EOF
 import { createRpcClient } from "$TMP_DIR/package/dist/renderer.js";
+import { createIpcKit } from "$TMP_DIR/package/dist/index.js";
 void createRpcClient;
+void createIpcKit;
 EOF
 
 cat > "$TMP_DIR/tsconfig.json" <<EOF
@@ -44,7 +49,7 @@ bunx tsc -p "$TMP_DIR/tsconfig.json" --noEmit
 echo "pack_dry_run_contains_expected_artifacts_only"
 DRY_RUN_OUTPUT="$(npm_config_cache=/tmp/npm-cache npm pack --dry-run 2>&1)"
 
-for required in "README.md" "package.json" "dist/main.js" "dist/renderer.js" "dist/preload.js" "dist/contract.d.ts"; do
+for required in "README.md" "package.json" "dist/index.js" "dist/index.d.ts" "dist/main.js" "dist/renderer.js" "dist/preload.js" "dist/contract.d.ts"; do
   if ! echo "$DRY_RUN_OUTPUT" | rg -q "$required"; then
     echo "Missing required artifact in pack dry-run output: $required"
     exit 1
