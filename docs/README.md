@@ -1,17 +1,16 @@
 # Documentation
 
-This folder is the maintainers' map for `electron-effect-rpc`. It is meant to
-explain intent and tradeoffs, not to walk line by line through implementation.
-When you need to understand why a piece of code exists, start here.
+This folder serves two audiences: package consumers and package maintainers.
 
-The architecture overview lives in `docs/architecture.md`. It describes how the
-main process, preload bridge, and renderer cooperate, and how RPC and event
-traffic move across process boundaries.
+If you are integrating `electron-effect-rpc` into an Electron app, use the
+tutorial track first:
 
-Design rationale is now tracked as ADRs in `docs/adr/`. Those records capture
-the key decisions that shaped the library, including what alternatives were
-considered and what consequences we accepted.
+- [Tutorial Index](./tutorials/README.md)
+- [First RPC: Main + Preload + Renderer](./tutorials/01-first-rpc.md)
+- [Typed Errors, Defects, and Diagnostics](./tutorials/02-typed-errors-defects-diagnostics.md)
+- [Events, Lifecycle, and Backpressure](./tutorials/03-events-lifecycle-backpressure.md)
 
-If you are making a non-trivial change, read the architecture overview first and
-then the ADRs most related to your change. That combination gives enough context
-to evolve behavior safely without drifting away from the original constraints.
+If you are changing internals, start with the architecture and ADRs:
+
+- [Architecture Overview](./architecture.md)
+- [Architecture Decision Records (ADR)](./adr/README.md)

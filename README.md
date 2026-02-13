@@ -29,6 +29,15 @@ bun add electron-effect-rpc effect @effect/schema
 If you are in a monorepo workspace, add the dependency to the target package
 and let the workspace resolver handle the rest.
 
+## Tutorials
+
+If you are adopting this package for the first time, start with the guided docs:
+
+- [Tutorial Index](./docs/tutorials/README.md)
+- [First RPC: Main + Preload + Renderer](./docs/tutorials/01-first-rpc.md)
+- [Typed Errors, Defects, and Diagnostics](./docs/tutorials/02-typed-errors-defects-diagnostics.md)
+- [Events, Lifecycle, and Backpressure](./docs/tutorials/03-events-lifecycle-backpressure.md)
+
 ## Core Concepts
 
 ### Communication directions
