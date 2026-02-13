@@ -10,6 +10,52 @@ const FooMethod = rpc("Foo", EmptyRequest, EmptyResponse);
 const BarEvent = event("Bar", EmptyEventPayload);
 
 describe("defineContract", () => {
+  it("contract_accepts_empty_methods_and_events", () => {
+    const contract = defineContract({
+      methods: [] as const,
+      events: [] as const,
+    });
+
+    expect(contract.methods).toEqual([]);
+    expect(contract.events).toEqual([]);
+  });
+
+  it("contract_preserves_method_and_event_order", () => {
+    const FirstMethod = rpc("First", S.Struct({}), S.Struct({}));
+    const SecondMethod = rpc("Second", S.Struct({}), S.Struct({}));
+    const FirstEvent = event("FirstEvent", S.Struct({}));
+    const SecondEvent = event("SecondEvent", S.Struct({}));
+
+    const contract = defineContract({
+      methods: [FirstMethod, SecondMethod] as const,
+      events: [FirstEvent, SecondEvent] as const,
+    });
+
+    expect(contract.methods.map((method) => method.name)).toEqual([
+      "First",
+      "Second",
+    ]);
+    expect(contract.events.map((ev) => ev.name)).toEqual([
+      "FirstEvent",
+      "SecondEvent",
+    ]);
+  });
+
+  it("contract_accepts_non_duplicate_same_shape_entries", () => {
+    const Alpha = rpc("Alpha", S.Struct({ value: S.Number }), S.Struct({ ok: S.Boolean }));
+    const Beta = rpc("Beta", S.Struct({ value: S.Number }), S.Struct({ ok: S.Boolean }));
+    const Tick = event("Tick", S.Struct({ value: S.Number }));
+    const Tock = event("Tock", S.Struct({ value: S.Number }));
+
+    const contract = defineContract({
+      methods: [Alpha, Beta] as const,
+      events: [Tick, Tock] as const,
+    });
+
+    expect(contract.methods).toHaveLength(2);
+    expect(contract.events).toHaveLength(2);
+  });
+
   it("throws on duplicate method names", () => {
     expect(() =>
       defineContract({ methods: [FooMethod, FooMethod], events: [] })
