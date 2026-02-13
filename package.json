@@ -35,6 +35,12 @@
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "bun run build",
+    "test:unit": "bun test",
+    "test:types": "bun run typecheck && bunx tsc -p tsconfig.type-tests.json --noEmit",
+    "test:packaging": "bash ./scripts/run-packaging-checks.sh",
+    "test:integration": "bun test __tests__/integration.test.ts",
+    "test:stress": "bun test __tests__/stress.test.ts",
+    "test:full": "bun run test:unit && bun run test:types && bun run test:packaging && bun run test:integration && bun run test:stress",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
