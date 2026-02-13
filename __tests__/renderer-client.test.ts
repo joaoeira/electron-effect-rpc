@@ -308,6 +308,69 @@ describe("createRpcClient", () => {
     });
   });
 
+  it("diagnostics_decode_failure_context_shape_is_stable", async () => {
+    const decodeFailures: Array<Record<string, unknown>> = [];
+    const invoke = createInvokeStub(async () => ({
+      type: "success",
+      data: { sum: "wrong-type" },
+    }));
+
+    const client = createRpcClient(contract, {
+      invoke,
+      diagnostics: {
+        onDecodeFailure: (context) => {
+          decodeFailures.push(context as unknown as Record<string, unknown>);
+        },
+      },
+    });
+
+    await expect(client.Add({ a: 1, b: 2 })).rejects.toThrow();
+    expect(decodeFailures).toHaveLength(1);
+    expect(decodeFailures[0]).toMatchObject({
+      scope: "rpc-response",
+      name: "Add",
+      payload: { sum: "wrong-type" },
+    });
+    expect(typeof decodeFailures[0]?.cause).not.toBe("undefined");
+  });
+
+  it("diagnostics_protocol_error_context_shape_is_stable", async () => {
+    const protocolErrors: Array<Record<string, unknown>> = [];
+    const malformed = { nope: true };
+    const invoke = createInvokeStub(async () => malformed);
+
+    const client = createRpcClient(contract, {
+      invoke,
+      diagnostics: {
+        onProtocolError: (context) => {
+          protocolErrors.push(context as unknown as Record<string, unknown>);
+        },
+      },
+    });
+
+    await expect(client.Add({ a: 1, b: 2 })).rejects.toThrow(/valid envelope/);
+    expect(protocolErrors).toHaveLength(1);
+    expect(protocolErrors[0]).toMatchObject({
+      method: "Add",
+      response: malformed,
+    });
+    expect(typeof protocolErrors[0]?.cause).not.toBe("undefined");
+  });
+
+  it("diagnostics_callbacks_throw_do_not_crash_transport", async () => {
+    const invoke = createInvokeStub(async () => ({ nope: true }));
+    const client = createRpcClient(contract, {
+      invoke,
+      diagnostics: {
+        onProtocolError: () => {
+          throw new Error("diagnostics crashed");
+        },
+      },
+    });
+
+    await expect(client.Add({ a: 1, b: 2 })).rejects.toThrow(/valid envelope/);
+  });
+
   it("reports invoke rejections as protocol defects", async () => {
     const protocolErrors: unknown[] = [];
     const invoke = createInvokeStub(async () => {
@@ -337,6 +400,31 @@ describe("createRpcClient", () => {
     }
 
     expect(protocolErrors.length).toBe(1);
+  });
+
+  it("success_paths_do_not_emit_failure_diagnostics", async () => {
+    const decodeFailures: unknown[] = [];
+    const protocolErrors: unknown[] = [];
+    const invoke = createInvokeStub(async () => ({
+      type: "success",
+      data: { sum: 8 },
+    }));
+
+    const client = createRpcClient(contract, {
+      invoke,
+      diagnostics: {
+        onDecodeFailure: (context) => {
+          decodeFailures.push(context);
+        },
+        onProtocolError: (context) => {
+          protocolErrors.push(context);
+        },
+      },
+    });
+
+    await expect(client.Add({ a: 3, b: 5 })).resolves.toEqual({ sum: 8 });
+    expect(decodeFailures).toEqual([]);
+    expect(protocolErrors).toEqual([]);
   });
 
   it("client_preserves_explicit_undefined_input", async () => {

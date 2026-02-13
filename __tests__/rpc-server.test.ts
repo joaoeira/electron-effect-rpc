@@ -387,6 +387,128 @@ describe("createRpcEndpoint", () => {
     expect(protocolErrors).toHaveLength(1);
   });
 
+  it("diagnostics_decode_failure_context_shape_is_stable", async () => {
+    const { ipcMain, handlers } = createIpcMainStub();
+    const decodeFailures: Array<Record<string, unknown>> = [];
+
+    const endpoint = createRpcEndpoint(contract, ipcMain, {
+      Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
+      Fail: () => Effect.fail(new DomainError({ message: "denied" })),
+    }, {
+      runtime: Runtime.defaultRuntime,
+      diagnostics: {
+        onDecodeFailure: (context) => {
+          decodeFailures.push(context as unknown as Record<string, unknown>);
+        },
+      },
+    });
+
+    endpoint.start();
+    const handler = requireHandler(handlers, "rpc/Add");
+    await handler({}, { a: 1 });
+
+    expect(decodeFailures).toHaveLength(1);
+    expect(decodeFailures[0]).toMatchObject({
+      scope: "rpc-request",
+      name: "Add",
+      payload: { a: 1 },
+    });
+    expect(typeof decodeFailures[0]?.cause).not.toBe("undefined");
+  });
+
+  it("diagnostics_protocol_error_context_shape_is_stable", async () => {
+    const Broken = rpc("Broken", S.Struct({}), S.Struct({ sum: S.Number }));
+    const brokenContract = defineContract({
+      methods: [Broken] as const,
+      events: [] as const,
+    });
+    const { ipcMain, handlers } = createIpcMainStub();
+    const protocolErrors: Array<Record<string, unknown>> = [];
+
+    const endpoint = createRpcEndpoint(brokenContract, ipcMain, {
+      Broken: () => Effect.succeed({ sum: "bad" } as never),
+    }, {
+      runtime: Runtime.defaultRuntime,
+      diagnostics: {
+        onProtocolError: (context) => {
+          protocolErrors.push(context as unknown as Record<string, unknown>);
+        },
+      },
+    });
+
+    endpoint.start();
+    const handler = requireHandler(handlers, "rpc/Broken");
+    await handler({}, {});
+
+    expect(protocolErrors).toHaveLength(1);
+    expect(protocolErrors[0]).toMatchObject({
+      method: "Broken",
+      response: { sum: "bad" },
+    });
+    expect(typeof protocolErrors[0]?.cause).not.toBe("undefined");
+  });
+
+  it("diagnostics_callbacks_throw_do_not_crash_transport", async () => {
+    const Broken = rpc("Broken", S.Struct({}), S.Struct({ sum: S.Number }));
+    const brokenContract = defineContract({
+      methods: [Broken] as const,
+      events: [] as const,
+    });
+    const { ipcMain, handlers } = createIpcMainStub();
+
+    const endpoint = createRpcEndpoint(brokenContract, ipcMain, {
+      Broken: () => Effect.succeed({ sum: "bad" } as never),
+    }, {
+      runtime: Runtime.defaultRuntime,
+      diagnostics: {
+        onProtocolError: () => {
+          throw new Error("diagnostics crashed");
+        },
+      },
+    });
+
+    endpoint.start();
+    const handler = requireHandler(handlers, "rpc/Broken");
+
+    expect(await handler({}, {})).toEqual({
+      type: "defect",
+      message: expect.stringContaining("success encoding failed"),
+      cause: expect.any(String),
+    });
+  });
+
+  it("success_paths_do_not_emit_failure_diagnostics", async () => {
+    const { ipcMain, handlers } = createIpcMainStub();
+    const decodeFailures: unknown[] = [];
+    const protocolErrors: unknown[] = [];
+
+    const endpoint = createRpcEndpoint(contract, ipcMain, {
+      Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
+      Fail: () => Effect.fail(new DomainError({ message: "denied" })),
+    }, {
+      runtime: Runtime.defaultRuntime,
+      diagnostics: {
+        onDecodeFailure: (context) => {
+          decodeFailures.push(context);
+        },
+        onProtocolError: (context) => {
+          protocolErrors.push(context);
+        },
+      },
+    });
+
+    endpoint.start();
+    const handler = requireHandler(handlers, "rpc/Add");
+    const envelope = parseRpcResponseEnvelope(await handler({}, { a: 1, b: 2 }));
+
+    expect(envelope).toEqual({
+      type: "success",
+      data: { sum: 3 },
+    });
+    expect(decodeFailures).toEqual([]);
+    expect(protocolErrors).toEqual([]);
+  });
+
   it("converts synchronous implementation throws into defect envelopes", async () => {
     const ThrowSync = rpc("ThrowSync", S.Struct({}), S.Struct({ ok: S.Boolean }));
     const throwContract = defineContract({

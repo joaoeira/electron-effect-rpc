@@ -652,6 +652,122 @@ describe("createEventPublisher", () => {
     });
   });
 
+  it("diagnostics_dispatch_failure_context_shape_is_stable", async () => {
+    const dispatchFailures: Array<Record<string, unknown>> = [];
+
+    const publisher = createEventPublisher(contract, {
+      getWindow: () => ({
+        isDestroyed: () => false,
+        webContents: {
+          send: () => {
+            throw new Error("send-failed");
+          },
+        },
+      }),
+      diagnostics: {
+        onDispatchFailure: (context) => {
+          dispatchFailures.push(context as unknown as Record<string, unknown>);
+        },
+      },
+    });
+
+    publisher.start();
+    await Effect.runPromise(publisher.publish(Progress, { value: 1 }));
+    await waitFor(() => dispatchFailures.length === 1);
+
+    expect(dispatchFailures[0]).toMatchObject({
+      event: "Progress",
+      payload: { value: 1 },
+    });
+    expect(typeof dispatchFailures[0]?.cause).not.toBe("undefined");
+  });
+
+  it("diagnostics_dropped_event_context_shape_is_stable", async () => {
+    const dropped: Array<Record<string, unknown>> = [];
+
+    const publisher = createEventPublisher(contract, {
+      getWindow: () => null,
+      diagnostics: {
+        onDroppedEvent: (context) => {
+          dropped.push(context as unknown as Record<string, unknown>);
+        },
+      },
+    });
+
+    publisher.start();
+    await Effect.runPromise(publisher.publish(Progress, { value: 1 }));
+    await waitFor(() => dropped.length === 1);
+
+    expect(dropped[0]).toMatchObject({
+      event: "Progress",
+      payload: { value: 1 },
+      reason: "window_unavailable",
+      queued: 0,
+      dropped: 1,
+    });
+  });
+
+  it("diagnostics_callbacks_throw_do_not_crash_transport", async () => {
+    const publisher = createEventPublisher(contract, {
+      getWindow: () => null,
+      diagnostics: {
+        onDroppedEvent: () => {
+          throw new Error("diagnostics crashed");
+        },
+      },
+    });
+
+    publisher.start();
+
+    await expect(
+      Effect.runPromise(publisher.publish(Progress, { value: 1 }))
+    ).resolves.toBeUndefined();
+    await waitFor(() => publisher.stats().dropped === 1);
+    expect(publisher.stats()).toEqual({ queued: 0, dropped: 1 });
+  });
+
+  it("success_paths_do_not_emit_failure_diagnostics", async () => {
+    const decodeFailures: unknown[] = [];
+    const dispatchFailures: unknown[] = [];
+    const dropped: unknown[] = [];
+    const sent: Array<{ channel: string; payload: unknown }> = [];
+    const windowStub = {
+      isDestroyed: () => false,
+      webContents: {
+        send: (channel: string, payload: unknown) => {
+          sent.push({ channel, payload });
+        },
+      },
+    };
+
+    const publisher = createEventPublisher(contract, {
+      getWindow: () => windowStub,
+      diagnostics: {
+        onDecodeFailure: (context) => {
+          decodeFailures.push(context);
+        },
+        onDispatchFailure: (context) => {
+          dispatchFailures.push(context);
+        },
+        onDroppedEvent: (context) => {
+          dropped.push(context);
+        },
+      },
+    });
+
+    publisher.start();
+    await Effect.runPromise(publisher.publish(Progress, { value: 123 }));
+    await waitFor(() => sent.length === 1);
+
+    expect(sent[0]).toEqual({
+      channel: "event/Progress",
+      payload: { value: 123 },
+    });
+    expect(decodeFailures).toEqual([]);
+    expect(dispatchFailures).toEqual([]);
+    expect(dropped).toEqual([]);
+  });
+
   it("publisher_stats_dropped_is_monotonic", async () => {
     const droppedCounts: number[] = [];
     let sendAttempt = 0;
