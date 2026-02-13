@@ -24,13 +24,13 @@ describe("createEventSubscriber", () => {
     events: [Progress] as const,
   });
 
-  it("requires a subscribe function", () => {
+  it("when event subscriber is created without subscribe, then creation throws", () => {
     expect(() => createEventSubscriber(contract)).toThrow(
       /EventSubscriberOptions.subscribe is required/
     );
   });
 
-  it("uses safe mode by default and reports decode failures", () => {
+  it("when subscriber uses default safe mode and payload decoding fails, then handler is skipped and diagnostics are reported", () => {
     let listener: ((payload: unknown) => void) | undefined;
     const decodeFailures: unknown[] = [];
 
@@ -58,7 +58,7 @@ describe("createEventSubscriber", () => {
     expect(decodeFailures.length).toBe(1);
   });
 
-  it("throws decode errors in strict mode", () => {
+  it("when subscriber uses strict mode and payload decoding fails, then decode error is thrown", () => {
     let listener: ((payload: unknown) => void) | undefined;
 
     const subscriber = createEventSubscriber(contract, {
@@ -74,7 +74,7 @@ describe("createEventSubscriber", () => {
     expect(() => listener?.({})).toThrow();
   });
 
-  it("throws for unknown subscribeByName events", () => {
+  it("when subscribeByName receives an unknown event name, then it throws", () => {
     const subscriber = createEventSubscriber(contract, {
       subscribe: () => () => {},
     });
@@ -84,7 +84,7 @@ describe("createEventSubscriber", () => {
     ).toThrow(/Unknown event: UnknownEvent/);
   });
 
-  it("when subscriber subscribeByName decodes and invokes handler", () => {
+  it("when subscribeByName receives a valid payload, then it decodes and invokes the handler", () => {
     let listener: ((payload: unknown) => void) | undefined;
 
     const subscriber = createEventSubscriber(contract, {
@@ -103,7 +103,7 @@ describe("createEventSubscriber", () => {
     expect(seen).toEqual([{ value: 42 }]);
   });
 
-  it("dispose unsubscribes active subscriptions", () => {
+  it("when subscriber is disposed, then all active subscriptions are unsubscribed", () => {
     let unsubscribeCalls = 0;
 
     const subscriber = createEventSubscriber(contract, {
@@ -119,7 +119,7 @@ describe("createEventSubscriber", () => {
     expect(unsubscribeCalls).toBe(2);
   });
 
-  it("when subscriber unsubscribe is idempotent", () => {
+  it("when unsubscribe is called twice, then underlying unsubscribe runs once", () => {
     let unsubscribeCalls = 0;
 
     const subscriber = createEventSubscriber(contract, {
@@ -135,7 +135,7 @@ describe("createEventSubscriber", () => {
     expect(unsubscribeCalls).toBe(1);
   });
 
-  it("when subscriber no handler calls after unsubscribe", () => {
+  it("when a subscription is unsubscribed, then its handler is no longer called", () => {
     const listeners = new Set<(payload: unknown) => void>();
 
     const subscriber = createEventSubscriber(contract, {
@@ -163,7 +163,7 @@ describe("createEventSubscriber", () => {
     expect(seen).toEqual([{ value: 1 }]);
   });
 
-  it("when subscriber no handler calls after dispose", () => {
+  it("when subscriber is disposed, then handlers are no longer called", () => {
     const listeners = new Set<(payload: unknown) => void>();
 
     const subscriber = createEventSubscriber(contract, {
@@ -191,7 +191,7 @@ describe("createEventSubscriber", () => {
     expect(seen).toEqual([{ value: 1 }]);
   });
 
-  it("dispose attempts all unsubscribes even if one throws", () => {
+  it("when one unsubscribe throws during dispose, then remaining unsubscribes are still attempted", () => {
     const calls: string[] = [];
     const unsubscribes = [
       () => {
@@ -224,7 +224,7 @@ describe("createEventPublisher", () => {
     events: [Progress] as const,
   });
 
-  it("dispatches encoded events to renderer listeners once started", async () => {
+  it("when publisher is started, then encoded events are dispatched to renderer listeners", async () => {
     const sent: Array<{ channel: string; payload: unknown }> = [];
     const windowStub = {
       isDestroyed: () => false,
@@ -251,7 +251,7 @@ describe("createEventPublisher", () => {
     });
   });
 
-  it("when publisher rejects invalid maxQueueSize zero", () => {
+  it("when maxQueueSize is zero, then publisher creation throws", () => {
     expect(() =>
       createEventPublisher(contract, {
         getWindow: () => null,
@@ -260,7 +260,7 @@ describe("createEventPublisher", () => {
     ).toThrow(/positive finite number/);
   });
 
-  it("when publisher rejects invalid maxQueueSize negative", () => {
+  it("when maxQueueSize is negative, then publisher creation throws", () => {
     expect(() =>
       createEventPublisher(contract, {
         getWindow: () => null,
@@ -269,7 +269,7 @@ describe("createEventPublisher", () => {
     ).toThrow(/positive finite number/);
   });
 
-  it("when publisher rejects invalid maxQueueSize infinite or nan", () => {
+  it("when maxQueueSize is infinite or NaN, then publisher creation throws", () => {
     expect(() =>
       createEventPublisher(contract, {
         getWindow: () => null,
@@ -285,7 +285,7 @@ describe("createEventPublisher", () => {
     ).toThrow(/positive finite number/);
   });
 
-  it("uses custom event channel prefixes", async () => {
+  it("when a custom event prefix is configured, then published events use that prefix", async () => {
     const sent: Array<{ channel: string; payload: unknown }> = [];
     const windowStub = {
       isDestroyed: () => false,
@@ -314,7 +314,7 @@ describe("createEventPublisher", () => {
     });
   });
 
-  it("when publisher fifo delivery order is preserved", async () => {
+  it("when multiple events are queued, then publisher preserves fifo delivery order", async () => {
     const sent: Array<{ channel: string; payload: unknown }> = [];
     const windowStub = {
       isDestroyed: () => false,
@@ -342,7 +342,7 @@ describe("createEventPublisher", () => {
     ]);
   });
 
-  it("drops oldest queued events when maxQueueSize is reached", async () => {
+  it("when queue reaches maxQueueSize, then oldest queued events are dropped", async () => {
     const sent: Array<{ channel: string; payload: unknown }> = [];
     const dropped: unknown[] = [];
 
@@ -381,7 +381,7 @@ describe("createEventPublisher", () => {
     ]);
   });
 
-  it("records drops when no renderer window is available during dispatch", async () => {
+  it("when renderer window is unavailable during dispatch, then event is dropped and drop diagnostics are recorded", async () => {
     const dropped: unknown[] = [];
 
     const publisher = createEventPublisher(contract, {
@@ -409,7 +409,7 @@ describe("createEventPublisher", () => {
     ]);
   });
 
-  it("when publisher records drop when window is destroyed", async () => {
+  it("when target window is destroyed, then publisher records the event as dropped", async () => {
     const dropped: unknown[] = [];
     const publisher = createEventPublisher(contract, {
       getWindow: () => ({
@@ -440,7 +440,7 @@ describe("createEventPublisher", () => {
     ]);
   });
 
-  it("when publisher records drop on encoding failure", async () => {
+  it("when event payload encoding fails, then publisher records a dropped event and decode diagnostics", async () => {
     const dropped: unknown[] = [];
     const decodeFailures: unknown[] = [];
     const sent: Array<{ channel: string; payload: unknown }> = [];
@@ -484,7 +484,7 @@ describe("createEventPublisher", () => {
     ]);
   });
 
-  it("when publisher stop pauses dispatch but keeps queue", async () => {
+  it("when publisher is stopped, then dispatch pauses and queued events are retained", async () => {
     const sent: Array<{ channel: string; payload: unknown }> = [];
     const windowStub = {
       isDestroyed: () => false,
@@ -508,7 +508,7 @@ describe("createEventPublisher", () => {
     expect(publisher.stats()).toEqual({ queued: 1, dropped: 0 });
   });
 
-  it("when publisher restart resumes drain", async () => {
+  it("when publisher restarts after stop, then queued events are drained", async () => {
     const sent: Array<{ channel: string; payload: unknown }> = [];
     const windowStub = {
       isDestroyed: () => false,
@@ -535,7 +535,7 @@ describe("createEventPublisher", () => {
     expect(publisher.stats()).toEqual({ queued: 0, dropped: 0 });
   });
 
-  it("when publisher publish after dispose is noop", async () => {
+  it("when publish is called after dispose, then no event is dispatched and stats stay unchanged", async () => {
     const sent: Array<{ channel: string; payload: unknown }> = [];
     const windowStub = {
       isDestroyed: () => false,
@@ -560,7 +560,7 @@ describe("createEventPublisher", () => {
     expect(publisher.stats()).toEqual({ queued: 0, dropped: 0 });
   });
 
-  it("keeps draining after dispatch failures", async () => {
+  it("when one dispatch fails, then publisher continues draining subsequent events", async () => {
     const dispatchFailures: unknown[] = [];
     const dropped: unknown[] = [];
     const sent: Array<{ channel: string; payload: unknown }> = [];
@@ -613,7 +613,7 @@ describe("createEventPublisher", () => {
     expect(sent[0]?.payload).toEqual({ value: 2 });
   });
 
-  it("when publisher dispatch failure reports dispatch and drop diagnostics consistently", async () => {
+  it("when dispatch fails, then dispatch-failure and dropped-event diagnostics are emitted consistently", async () => {
     const dispatchFailures: unknown[] = [];
     const dropped: unknown[] = [];
 
@@ -652,7 +652,7 @@ describe("createEventPublisher", () => {
     });
   });
 
-  it("when diagnostics dispatch failure context shape is stable", async () => {
+  it("when dispatch-failure diagnostics are emitted, then context shape is stable", async () => {
     const dispatchFailures: Array<Record<string, unknown>> = [];
 
     const publisher = createEventPublisher(contract, {
@@ -682,7 +682,7 @@ describe("createEventPublisher", () => {
     expect(typeof dispatchFailures[0]?.cause).not.toBe("undefined");
   });
 
-  it("when diagnostics dropped event context shape is stable", async () => {
+  it("when dropped-event diagnostics are emitted, then context shape is stable", async () => {
     const dropped: Array<Record<string, unknown>> = [];
 
     const publisher = createEventPublisher(contract, {
@@ -707,7 +707,7 @@ describe("createEventPublisher", () => {
     });
   });
 
-  it("when diagnostics callbacks throw do not crash transport", async () => {
+  it("when event diagnostics callbacks throw, then publisher transport continues", async () => {
     const publisher = createEventPublisher(contract, {
       getWindow: () => null,
       diagnostics: {
@@ -726,7 +726,7 @@ describe("createEventPublisher", () => {
     expect(publisher.stats()).toEqual({ queued: 0, dropped: 1 });
   });
 
-  it("when success paths do not emit failure diagnostics", async () => {
+  it("when event dispatch succeeds, then failure diagnostics are not emitted", async () => {
     const decodeFailures: unknown[] = [];
     const dispatchFailures: unknown[] = [];
     const dropped: unknown[] = [];
@@ -768,7 +768,7 @@ describe("createEventPublisher", () => {
     expect(dropped).toEqual([]);
   });
 
-  it("when publisher stats dropped is monotonic", async () => {
+  it("when events are dropped over time, then dropped counter is monotonic", async () => {
     const droppedCounts: number[] = [];
     let sendAttempt = 0;
 
@@ -799,7 +799,7 @@ describe("createEventPublisher", () => {
     expect(droppedCounts[1]).toBeLessThanOrEqual(droppedCounts[2] ?? 0);
   });
 
-  it("is idempotent on stop/dispose and rejects restart after dispose", () => {
+  it("when stop and dispose are repeated, then operations are idempotent and restart after dispose throws", () => {
     const windowStub = {
       isDestroyed: () => false,
       webContents: {

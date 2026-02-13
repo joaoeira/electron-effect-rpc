@@ -7,7 +7,7 @@ import {
 } from "../src/protocol.ts";
 
 describe("protocol", () => {
-  it("when protocol parse accepts valid success envelope", () => {
+  it("when a success envelope has the required shape, then parser returns a success envelope", () => {
     const envelope = parseRpcResponseEnvelope({
       type: "success",
       data: { ok: true },
@@ -19,7 +19,7 @@ describe("protocol", () => {
     });
   });
 
-  it("when protocol parse accepts valid failure envelope", () => {
+  it("when a failure envelope has the required shape, then parser returns a failure envelope", () => {
     const envelope = parseRpcResponseEnvelope({
       type: "failure",
       error: {
@@ -37,7 +37,7 @@ describe("protocol", () => {
     });
   });
 
-  it("when protocol parse accepts valid defect envelope", () => {
+  it("when a defect envelope has the required shape, then parser returns a defect envelope", () => {
     const envelope = parseRpcResponseEnvelope({
       type: "defect",
       message: "boom",
@@ -51,13 +51,13 @@ describe("protocol", () => {
     });
   });
 
-  it("when protocol parse rejects non object", () => {
+  it("when response input is not an object, then parser returns null", () => {
     expect(parseRpcResponseEnvelope(null)).toBeNull();
     expect(parseRpcResponseEnvelope(42)).toBeNull();
     expect(parseRpcResponseEnvelope("oops")).toBeNull();
   });
 
-  it("when protocol parse rejects missing required fields", () => {
+  it("when required envelope fields are missing, then parser returns null", () => {
     expect(parseRpcResponseEnvelope({ type: "success" })).toBeNull();
     expect(
       parseRpcResponseEnvelope({
@@ -70,27 +70,27 @@ describe("protocol", () => {
     expect(parseRpcResponseEnvelope({ type: "defect", cause: "x" })).toBeNull();
   });
 
-  it("when protocol parse rejects unknown type", () => {
+  it("when envelope type is unknown, then parser returns null", () => {
     expect(parseRpcResponseEnvelope({ type: "wat", data: {} })).toBeNull();
   });
 
-  it("when protocol extractErrorTag prefers tagged error tag", () => {
+  it("when error has a _tag field, then extractErrorTag returns that tag", () => {
     expect(extractErrorTag({ _tag: "TaggedDomainError", message: "x" })).toBe(
       "TaggedDomainError"
     );
   });
 
-  it("when protocol extractErrorTag falls back to error name", () => {
+  it("when error has no _tag but is an Error instance, then extractErrorTag returns error.name", () => {
     const error = new TypeError("nope");
     expect(extractErrorTag(error)).toBe("TypeError");
   });
 
-  it("when protocol extractErrorTag defaults to RpcError", () => {
+  it("when no tag or Error name is available, then extractErrorTag returns RpcError", () => {
     expect(extractErrorTag({ message: "x" })).toBe("RpcError");
     expect(extractErrorTag(undefined)).toBe("RpcError");
   });
 
-  it("when protocol toDefectEnvelope formats error and non error causes", () => {
+  it("when building a defect envelope from unknown causes, then message and cause are stringified consistently", () => {
     const fromError = toDefectEnvelope(new Error("broken"), "prefix");
     const fromValue = toDefectEnvelope(404, "prefix");
 
@@ -106,7 +106,7 @@ describe("protocol", () => {
     });
   });
 
-  it("when protocol safelyCall swallows callback errors", () => {
+  it("when diagnostics callback throws, then safelyCall swallows the exception", () => {
     let callCount = 0;
 
     expect(() =>

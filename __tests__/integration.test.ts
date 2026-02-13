@@ -107,7 +107,7 @@ const createEventBusHarness = (prefix: ChannelPrefix = { rpc: "rpc/", event: "ev
 };
 
 describe("integration", () => {
-  it("when e2e rpc success failure defect roundtrip", async () => {
+  it("when rpc calls roundtrip end-to-end, then success, typed failure, and defect behaviors are preserved", async () => {
     const Add = rpc(
       "Add",
       S.Struct({ a: S.Number, b: S.Number }),
@@ -137,7 +137,7 @@ describe("integration", () => {
     await expect(client.Crash()).rejects.toBeInstanceOf(RpcDefectError);
   });
 
-  it("when e2e custom prefix alignment main preload renderer", async () => {
+  it("when main, preload, and renderer use matching custom prefixes, then rpc and event routing works end-to-end", async () => {
     const prefix = { rpc: "rpc-x/", event: "evt-x/" } as const;
     const Ping = rpc("Ping", S.Struct({}), S.Struct({ ok: S.Boolean }));
     const Progress = event("Progress", S.Struct({ step: S.Number }));
@@ -180,7 +180,7 @@ describe("integration", () => {
     expect(seen).toEqual([{ step: 1 }]);
   });
 
-  it("when e2e event roundtrip decode integrity", async () => {
+  it("when events roundtrip end-to-end, then payload decoding integrity is preserved", async () => {
     const Progress = event(
       "Progress",
       S.Struct({
@@ -215,7 +215,7 @@ describe("integration", () => {
     expect(seen).toEqual([{ value: 10, status: "working" }]);
   });
 
-  it("when integration lifecycle repeated start stop cycles no leak signals", async () => {
+  it("when endpoint lifecycle is repeated across start and stop cycles, then no leak signals appear", async () => {
     const Ping = rpc("Ping", S.Struct({}), S.Struct({ ok: S.Boolean }));
     const Progress = event("Progress", S.Struct({ value: S.Number }));
     const contract = defineContract({

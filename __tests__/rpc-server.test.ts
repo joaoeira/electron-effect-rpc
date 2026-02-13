@@ -57,7 +57,7 @@ describe("createRpcEndpoint", () => {
     events: [] as const,
   });
 
-  it("registers handlers on start and unregisters on stop", () => {
+  it("when an endpoint starts and stops normally, then handlers are registered and removed", () => {
     const { ipcMain, handlers } = createIpcMainStub();
 
     const endpoint = createRpcEndpoint(contract, ipcMain, {
@@ -80,7 +80,7 @@ describe("createRpcEndpoint", () => {
     expect(handlers.size).toBe(0);
   });
 
-  it("when endpoint rejects missing implementation", () => {
+  it("when a contract method has no implementation, then endpoint creation throws", () => {
     const { ipcMain } = createIpcMainStub();
 
     expect(() =>
@@ -97,7 +97,7 @@ describe("createRpcEndpoint", () => {
     ).toThrow(/Missing implementation for RPC method: Fail/);
   });
 
-  it("when endpoint rejects unknown implementation key", () => {
+  it("when implementations include a method not in the contract, then endpoint creation throws", () => {
     const { ipcMain } = createIpcMainStub();
 
     expect(() =>
@@ -116,7 +116,7 @@ describe("createRpcEndpoint", () => {
     ).toThrow(/unknown RPC method: Extra/);
   });
 
-  it("when endpoint uses custom rpc channel prefix", () => {
+  it("when a custom rpc channel prefix is configured, then handlers are registered with that prefix", () => {
     const { ipcMain, handlers } = createIpcMainStub();
 
     const endpoint = createRpcEndpoint(contract, ipcMain, {
@@ -135,7 +135,7 @@ describe("createRpcEndpoint", () => {
     expect(handlers.has("rpc-custom/Fail")).toBe(true);
   });
 
-  it("returns success envelopes", async () => {
+  it("when a handler succeeds, then the endpoint returns a success envelope", async () => {
     const { ipcMain, handlers } = createIpcMainStub();
 
     const endpoint = createRpcEndpoint(contract, ipcMain, {
@@ -157,7 +157,7 @@ describe("createRpcEndpoint", () => {
     });
   });
 
-  it("returns typed failure envelopes", async () => {
+  it("when a handler fails with a tagged error, then the endpoint returns a typed failure envelope", async () => {
     const { ipcMain, handlers } = createIpcMainStub();
 
     const endpoint = createRpcEndpoint(contract, ipcMain, {
@@ -185,7 +185,7 @@ describe("createRpcEndpoint", () => {
     expect(decoded.message).toBe("denied");
   });
 
-  it("returns defect envelopes when request payload decoding fails", async () => {
+  it("when request payload decoding fails, then the endpoint returns a defect envelope", async () => {
     const { ipcMain, handlers } = createIpcMainStub();
     const decodeFailures: unknown[] = [];
 
@@ -216,7 +216,7 @@ describe("createRpcEndpoint", () => {
     expect(decodeFailures.length).toBe(1);
   });
 
-  it("when endpoint decode failure includes scope name payload", async () => {
+  it("when request decoding fails, then decode diagnostics include scope, method name, payload, and cause", async () => {
     const { ipcMain, handlers } = createIpcMainStub();
     const decodeFailures: Array<Record<string, unknown>> = [];
 
@@ -245,7 +245,7 @@ describe("createRpcEndpoint", () => {
     expect(decodeFailures[0]?.cause).toBeDefined();
   });
 
-  it("when endpoint returns defect for NoError typed failure", async () => {
+  it("when a NoError method returns typed failure, then endpoint responds with defect envelope", async () => {
     const NoErrorMethod = rpc("NoErrorMethod", S.Struct({}), S.Struct({ ok: S.Boolean }));
     const noErrorContract = defineContract({
       methods: [NoErrorMethod] as const,
@@ -270,7 +270,7 @@ describe("createRpcEndpoint", () => {
     }
   });
 
-  it("when endpoint returns defect for effect die", async () => {
+  it("when handler dies with a defect, then endpoint responds with defect envelope", async () => {
     const DieMethod = rpc("DieMethod", S.Struct({}), S.Struct({ ok: S.Boolean }));
     const dieContract = defineContract({
       methods: [DieMethod] as const,
@@ -294,7 +294,7 @@ describe("createRpcEndpoint", () => {
     }
   });
 
-  it("when endpoint returns defect for effect interrupt", async () => {
+  it("when handler is interrupted, then endpoint responds with defect envelope", async () => {
     const InterruptMethod = rpc(
       "InterruptMethod",
       S.Struct({}),
@@ -322,7 +322,7 @@ describe("createRpcEndpoint", () => {
     }
   });
 
-  it("when endpoint reports protocol error on success encode failure", async () => {
+  it("when success payload encoding fails, then protocol diagnostics are reported and defect envelope is returned", async () => {
     const SuccessEncodeBreak = rpc(
       "SuccessEncodeBreak",
       S.Struct({}),
@@ -354,7 +354,7 @@ describe("createRpcEndpoint", () => {
     expect(protocolErrors).toHaveLength(1);
   });
 
-  it("when endpoint reports protocol error on failure encode failure", async () => {
+  it("when failure payload encoding fails, then protocol diagnostics are reported and defect envelope is returned", async () => {
     const FailureEncodeBreak = rpc(
       "FailureEncodeBreak",
       S.Struct({}),
@@ -387,7 +387,7 @@ describe("createRpcEndpoint", () => {
     expect(protocolErrors).toHaveLength(1);
   });
 
-  it("when diagnostics decode failure context shape is stable", async () => {
+  it("when endpoint emits decode-failure diagnostics, then context shape remains stable", async () => {
     const { ipcMain, handlers } = createIpcMainStub();
     const decodeFailures: Array<Record<string, unknown>> = [];
 
@@ -416,7 +416,7 @@ describe("createRpcEndpoint", () => {
     expect(typeof decodeFailures[0]?.cause).not.toBe("undefined");
   });
 
-  it("when diagnostics protocol error context shape is stable", async () => {
+  it("when endpoint emits protocol-error diagnostics, then context shape remains stable", async () => {
     const Broken = rpc("Broken", S.Struct({}), S.Struct({ sum: S.Number }));
     const brokenContract = defineContract({
       methods: [Broken] as const,
@@ -448,7 +448,7 @@ describe("createRpcEndpoint", () => {
     expect(typeof protocolErrors[0]?.cause).not.toBe("undefined");
   });
 
-  it("when diagnostics callbacks throw do not crash transport", async () => {
+  it("when endpoint diagnostics callback throws, then transport still returns a defect envelope", async () => {
     const Broken = rpc("Broken", S.Struct({}), S.Struct({ sum: S.Number }));
     const brokenContract = defineContract({
       methods: [Broken] as const,
@@ -477,7 +477,7 @@ describe("createRpcEndpoint", () => {
     });
   });
 
-  it("when success paths do not emit failure diagnostics", async () => {
+  it("when rpc execution succeeds, then failure diagnostics are not emitted", async () => {
     const { ipcMain, handlers } = createIpcMainStub();
     const decodeFailures: unknown[] = [];
     const protocolErrors: unknown[] = [];
@@ -509,7 +509,7 @@ describe("createRpcEndpoint", () => {
     expect(protocolErrors).toEqual([]);
   });
 
-  it("converts synchronous implementation throws into defect envelopes", async () => {
+  it("when an implementation throws synchronously, then the endpoint returns a defect envelope", async () => {
     const ThrowSync = rpc("ThrowSync", S.Struct({}), S.Struct({ ok: S.Boolean }));
     const throwContract = defineContract({
       methods: [ThrowSync] as const,
@@ -540,7 +540,7 @@ describe("createRpcEndpoint", () => {
     expect(envelope.message).toContain("sync boom");
   });
 
-  it("is idempotent on stop/dispose and rejects restart after dispose", () => {
+  it("when stop or dispose is called repeatedly, then cleanup is idempotent and restart after dispose is rejected", () => {
     const { ipcMain } = createIpcMainStub();
 
     const endpoint = createRpcEndpoint(contract, ipcMain, {
@@ -559,7 +559,7 @@ describe("createRpcEndpoint", () => {
     expect(() => endpoint.start()).toThrow(/disposed/i);
   });
 
-  it("when endpoint start idempotent when running", () => {
+  it("when start is called twice while running, then handler registration happens only once", () => {
     const handleCalls: string[] = [];
     const removeCalls: string[] = [];
 
@@ -587,7 +587,7 @@ describe("createRpcEndpoint", () => {
     expect(removeCalls).toHaveLength(0);
   });
 
-  it("when endpoint stop idempotent when stopped", () => {
+  it("when stop is called twice, then handler removal happens only once", () => {
     const removeCalls: string[] = [];
 
     const ipcMain: IpcMainLike = {
@@ -612,7 +612,7 @@ describe("createRpcEndpoint", () => {
     expect(removeCalls).toEqual(expect.arrayContaining(["rpc/Add", "rpc/Fail"]));
   });
 
-  it("when endpoint runtime is used for effect execution", async () => {
+  it("when a runtime provides services, then handlers resolve those services through the provided runtime", async () => {
     class Offset extends Context.Tag("Offset")<Offset, number>() {}
 
     const WithRuntime = rpc(
@@ -650,7 +650,7 @@ describe("createRpcEndpoint", () => {
     });
   });
 
-  it("when endpoint handles parallel invocations without cross talk", async () => {
+  it("when multiple rpc invocations run concurrently, then each response matches its own input", async () => {
     const Parallel = rpc(
       "Parallel",
       S.Struct({ a: S.Number, b: S.Number }),
@@ -695,7 +695,7 @@ describe("createRpcEndpoint", () => {
     });
   });
 
-  it("cleans up already-registered handlers when start fails mid-registration", () => {
+  it("when start fails partway through registration, then already-registered handlers are cleaned up", () => {
     const handlers = new Map<string, (event: unknown, payload: unknown) => unknown>();
 
     const ipcMain: IpcMainLike = {
@@ -726,7 +726,7 @@ describe("createRpcEndpoint", () => {
     expect(handlers.size).toBe(0);
   });
 
-  it("marks endpoint as stopped even if removeHandler throws", () => {
+  it("when removeHandler throws during stop, then the endpoint is still marked as stopped", () => {
     const removals: string[] = [];
     const throwsOn = new Set<string>(["rpc/Add"]);
 
@@ -755,7 +755,7 @@ describe("createRpcEndpoint", () => {
     expect(removals).toEqual(expect.arrayContaining(["rpc/Add", "rpc/Fail"]));
   });
 
-  it("finalizes disposal even if stop throws", () => {
+  it("when stop throws during dispose, then disposal is still finalized", () => {
     const ipcMain: IpcMainLike = {
       handle: () => {},
       removeHandler: () => {
