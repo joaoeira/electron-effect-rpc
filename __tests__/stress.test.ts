@@ -45,7 +45,7 @@ const createRpcHarness = () => {
 };
 
 describe("stress", () => {
-  it("stress_high_volume_rpc_calls_no_state_corruption", async () => {
+  it("when stress high volume rpc calls no state corruption", async () => {
     const Add = rpc(
       "Add",
       S.Struct({ a: S.Number, b: S.Number }),
@@ -81,7 +81,7 @@ describe("stress", () => {
     }
   });
 
-  it("stress_event_burst_memory_bounded_by_maxQueue", async () => {
+  it("when stress event burst memory bounded by maxQueue", async () => {
     const Progress = event("Progress", S.Struct({ value: S.Number }));
     const contract = defineContract({
       methods: [] as const,
@@ -103,7 +103,7 @@ describe("stress", () => {
     });
   });
 
-  it("stress_window_flap_preserves_drop_accounting_consistency", async () => {
+  it("when stress window flap preserves drop accounting consistency", async () => {
     const Progress = event("Progress", S.Struct({ value: S.Number }));
     const contract = defineContract({
       methods: [] as const,

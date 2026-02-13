@@ -57,7 +57,7 @@ describe("createRpcClient", () => {
     ]);
   });
 
-  it("client_uses_custom_invoke_method_name_verbatim", async () => {
+  it("when client uses custom invoke method name verbatim", async () => {
     const MethodWithPath = rpc(
       "system/get.version",
       S.Struct({}),
@@ -152,7 +152,7 @@ describe("createRpcClient", () => {
     }
   });
 
-  it("client_throws_defect_when_failure_received_for_NoError_method", async () => {
+  it("when client throws defect when failure received for NoError method", async () => {
     const invoke = createInvokeStub(async () => ({
       type: "failure",
       error: {
@@ -232,7 +232,7 @@ describe("createRpcClient", () => {
     });
   });
 
-  it("client_protocol_error_context_contains_raw_response", async () => {
+  it("when client protocol error context contains raw response", async () => {
     const protocolErrors: unknown[] = [];
     const rawResponse = { impossible: true };
     const invoke = createInvokeStub(async () => rawResponse);
@@ -254,7 +254,7 @@ describe("createRpcClient", () => {
     });
   });
 
-  it("client_reports_decode_failure_on_invalid_success_payload", async () => {
+  it("when client reports decode failure on invalid success payload", async () => {
     const decodeFailures: unknown[] = [];
     const invoke = createInvokeStub(async () => ({
       type: "success",
@@ -281,7 +281,7 @@ describe("createRpcClient", () => {
     });
   });
 
-  it("client_reports_decode_failure_on_invalid_failure_payload", async () => {
+  it("when client reports decode failure on invalid failure payload", async () => {
     const decodeFailures: unknown[] = [];
     const invoke = createInvokeStub(async () => ({
       type: "failure",
@@ -308,7 +308,7 @@ describe("createRpcClient", () => {
     });
   });
 
-  it("diagnostics_decode_failure_context_shape_is_stable", async () => {
+  it("when diagnostics decode failure context shape is stable", async () => {
     const decodeFailures: Array<Record<string, unknown>> = [];
     const invoke = createInvokeStub(async () => ({
       type: "success",
@@ -334,7 +334,7 @@ describe("createRpcClient", () => {
     expect(typeof decodeFailures[0]?.cause).not.toBe("undefined");
   });
 
-  it("diagnostics_protocol_error_context_shape_is_stable", async () => {
+  it("when diagnostics protocol error context shape is stable", async () => {
     const protocolErrors: Array<Record<string, unknown>> = [];
     const malformed = { nope: true };
     const invoke = createInvokeStub(async () => malformed);
@@ -357,7 +357,7 @@ describe("createRpcClient", () => {
     expect(typeof protocolErrors[0]?.cause).not.toBe("undefined");
   });
 
-  it("diagnostics_callbacks_throw_do_not_crash_transport", async () => {
+  it("when diagnostics callbacks throw do not crash transport", async () => {
     const invoke = createInvokeStub(async () => ({ nope: true }));
     const client = createRpcClient(contract, {
       invoke,
@@ -402,7 +402,7 @@ describe("createRpcClient", () => {
     expect(protocolErrors.length).toBe(1);
   });
 
-  it("success_paths_do_not_emit_failure_diagnostics", async () => {
+  it("when success paths do not emit failure diagnostics", async () => {
     const decodeFailures: unknown[] = [];
     const protocolErrors: unknown[] = [];
     const invoke = createInvokeStub(async () => ({
@@ -427,7 +427,7 @@ describe("createRpcClient", () => {
     expect(protocolErrors).toEqual([]);
   });
 
-  it("client_preserves_explicit_undefined_input", async () => {
+  it("when client preserves explicit undefined input", async () => {
     const AcceptUndefined = rpc(
       "AcceptUndefined",
       S.Undefined,
@@ -458,7 +458,7 @@ describe("createRpcClient", () => {
     ]);
   });
 
-  it("client_omitted_input_uses_default_decode_only_when_arg_absent", async () => {
+  it("when client omitted input uses default decode only when arg absent", async () => {
     const AcceptNull = rpc("AcceptNull", S.Null, S.Struct({ ok: S.Boolean }));
     const nullContract = defineContract({
       methods: [AcceptNull] as const,
@@ -477,7 +477,7 @@ describe("createRpcClient", () => {
     expect(invoke.invocations).toEqual([]);
   });
 
-  it("client_envelope_mode_rejects_legacy_exit_payload", async () => {
+  it("when client envelope mode rejects legacy exit payload", async () => {
     const encodeLegacyExit = S.encodeUnknownSync(exitSchemaFor(Add));
     const invoke = createInvokeStub(async () => {
       const exit = await Effect.runPromiseExit(Effect.succeed({ sum: 10 }));
@@ -492,7 +492,7 @@ describe("createRpcClient", () => {
     await expect(client.Add({ a: 4, b: 6 })).rejects.toThrow(/valid envelope/);
   });
 
-  it("client_dual_mode_prefers_envelope_over_legacy_when_both_possible", async () => {
+  it("when client dual mode prefers envelope over legacy when both possible", async () => {
     const invoke = createInvokeStub(async () => ({
       type: "success",
       data: { sum: "wrong-type" },
@@ -534,7 +534,7 @@ describe("createRpcClient", () => {
     expect(result).toEqual({ sum: 10 });
   });
 
-  it("client_dual_mode_legacy_failure_throws_typed_error", async () => {
+  it("when client dual mode legacy failure throws typed error", async () => {
     const encodeLegacyExit = S.encodeUnknownSync(exitSchemaFor(MayFail));
     const invoke = createInvokeStub(async () => {
       const exit = await Effect.runPromiseExit(
@@ -551,7 +551,7 @@ describe("createRpcClient", () => {
     await expect(client.MayFail()).rejects.toBeInstanceOf(AccessDeniedError);
   });
 
-  it("client_dual_mode_legacy_defect_throws_RpcDefectError", async () => {
+  it("when client dual mode legacy defect throws RpcDefectError", async () => {
     const encodeLegacyExit = S.encodeUnknownSync(exitSchemaFor(Add));
     const invoke = createInvokeStub(async () => {
       const exit = await Effect.runPromiseExit(Effect.dieMessage("legacy-die"));
@@ -566,7 +566,7 @@ describe("createRpcClient", () => {
     await expect(client.Add({ a: 1, b: 2 })).rejects.toBeInstanceOf(RpcDefectError);
   });
 
-  it("client_dual_mode_legacy_interrupt_throws_RpcDefectError", async () => {
+  it("when client dual mode legacy interrupt throws RpcDefectError", async () => {
     const encodeLegacyExit = S.encodeUnknownSync(exitSchemaFor(Add));
     const invoke = createInvokeStub(async () => {
       const exit = await Effect.runPromiseExit(Effect.interrupt);

@@ -7,7 +7,7 @@ import {
 } from "../src/protocol.ts";
 
 describe("protocol", () => {
-  it("protocol_parse_accepts_valid_success_envelope", () => {
+  it("when protocol parse accepts valid success envelope", () => {
     const envelope = parseRpcResponseEnvelope({
       type: "success",
       data: { ok: true },
@@ -19,7 +19,7 @@ describe("protocol", () => {
     });
   });
 
-  it("protocol_parse_accepts_valid_failure_envelope", () => {
+  it("when protocol parse accepts valid failure envelope", () => {
     const envelope = parseRpcResponseEnvelope({
       type: "failure",
       error: {
@@ -37,7 +37,7 @@ describe("protocol", () => {
     });
   });
 
-  it("protocol_parse_accepts_valid_defect_envelope", () => {
+  it("when protocol parse accepts valid defect envelope", () => {
     const envelope = parseRpcResponseEnvelope({
       type: "defect",
       message: "boom",
@@ -51,13 +51,13 @@ describe("protocol", () => {
     });
   });
 
-  it("protocol_parse_rejects_non_object", () => {
+  it("when protocol parse rejects non object", () => {
     expect(parseRpcResponseEnvelope(null)).toBeNull();
     expect(parseRpcResponseEnvelope(42)).toBeNull();
     expect(parseRpcResponseEnvelope("oops")).toBeNull();
   });
 
-  it("protocol_parse_rejects_missing_required_fields", () => {
+  it("when protocol parse rejects missing required fields", () => {
     expect(parseRpcResponseEnvelope({ type: "success" })).toBeNull();
     expect(
       parseRpcResponseEnvelope({
@@ -70,27 +70,27 @@ describe("protocol", () => {
     expect(parseRpcResponseEnvelope({ type: "defect", cause: "x" })).toBeNull();
   });
 
-  it("protocol_parse_rejects_unknown_type", () => {
+  it("when protocol parse rejects unknown type", () => {
     expect(parseRpcResponseEnvelope({ type: "wat", data: {} })).toBeNull();
   });
 
-  it("protocol_extractErrorTag_prefers_tagged_error_tag", () => {
+  it("when protocol extractErrorTag prefers tagged error tag", () => {
     expect(extractErrorTag({ _tag: "TaggedDomainError", message: "x" })).toBe(
       "TaggedDomainError"
     );
   });
 
-  it("protocol_extractErrorTag_falls_back_to_error_name", () => {
+  it("when protocol extractErrorTag falls back to error name", () => {
     const error = new TypeError("nope");
     expect(extractErrorTag(error)).toBe("TypeError");
   });
 
-  it("protocol_extractErrorTag_defaults_to_RpcError", () => {
+  it("when protocol extractErrorTag defaults to RpcError", () => {
     expect(extractErrorTag({ message: "x" })).toBe("RpcError");
     expect(extractErrorTag(undefined)).toBe("RpcError");
   });
 
-  it("protocol_toDefectEnvelope_formats_error_and_non_error_causes", () => {
+  it("when protocol toDefectEnvelope formats error and non error causes", () => {
     const fromError = toDefectEnvelope(new Error("broken"), "prefix");
     const fromValue = toDefectEnvelope(404, "prefix");
 
@@ -106,7 +106,7 @@ describe("protocol", () => {
     });
   });
 
-  it("protocol_safelyCall_swallows_callback_errors", () => {
+  it("when protocol safelyCall swallows callback errors", () => {
     let callCount = 0;
 
     expect(() =>

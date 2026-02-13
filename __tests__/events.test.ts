@@ -84,7 +84,7 @@ describe("createEventSubscriber", () => {
     ).toThrow(/Unknown event: UnknownEvent/);
   });
 
-  it("subscriber_subscribeByName_decodes_and_invokes_handler", () => {
+  it("when subscriber subscribeByName decodes and invokes handler", () => {
     let listener: ((payload: unknown) => void) | undefined;
 
     const subscriber = createEventSubscriber(contract, {
@@ -119,7 +119,7 @@ describe("createEventSubscriber", () => {
     expect(unsubscribeCalls).toBe(2);
   });
 
-  it("subscriber_unsubscribe_is_idempotent", () => {
+  it("when subscriber unsubscribe is idempotent", () => {
     let unsubscribeCalls = 0;
 
     const subscriber = createEventSubscriber(contract, {
@@ -135,7 +135,7 @@ describe("createEventSubscriber", () => {
     expect(unsubscribeCalls).toBe(1);
   });
 
-  it("subscriber_no_handler_calls_after_unsubscribe", () => {
+  it("when subscriber no handler calls after unsubscribe", () => {
     const listeners = new Set<(payload: unknown) => void>();
 
     const subscriber = createEventSubscriber(contract, {
@@ -163,7 +163,7 @@ describe("createEventSubscriber", () => {
     expect(seen).toEqual([{ value: 1 }]);
   });
 
-  it("subscriber_no_handler_calls_after_dispose", () => {
+  it("when subscriber no handler calls after dispose", () => {
     const listeners = new Set<(payload: unknown) => void>();
 
     const subscriber = createEventSubscriber(contract, {
@@ -251,7 +251,7 @@ describe("createEventPublisher", () => {
     });
   });
 
-  it("publisher_rejects_invalid_maxQueueSize_zero", () => {
+  it("when publisher rejects invalid maxQueueSize zero", () => {
     expect(() =>
       createEventPublisher(contract, {
         getWindow: () => null,
@@ -260,7 +260,7 @@ describe("createEventPublisher", () => {
     ).toThrow(/positive finite number/);
   });
 
-  it("publisher_rejects_invalid_maxQueueSize_negative", () => {
+  it("when publisher rejects invalid maxQueueSize negative", () => {
     expect(() =>
       createEventPublisher(contract, {
         getWindow: () => null,
@@ -269,7 +269,7 @@ describe("createEventPublisher", () => {
     ).toThrow(/positive finite number/);
   });
 
-  it("publisher_rejects_invalid_maxQueueSize_infinite_or_nan", () => {
+  it("when publisher rejects invalid maxQueueSize infinite or nan", () => {
     expect(() =>
       createEventPublisher(contract, {
         getWindow: () => null,
@@ -314,7 +314,7 @@ describe("createEventPublisher", () => {
     });
   });
 
-  it("publisher_fifo_delivery_order_is_preserved", async () => {
+  it("when publisher fifo delivery order is preserved", async () => {
     const sent: Array<{ channel: string; payload: unknown }> = [];
     const windowStub = {
       isDestroyed: () => false,
@@ -409,7 +409,7 @@ describe("createEventPublisher", () => {
     ]);
   });
 
-  it("publisher_records_drop_when_window_is_destroyed", async () => {
+  it("when publisher records drop when window is destroyed", async () => {
     const dropped: unknown[] = [];
     const publisher = createEventPublisher(contract, {
       getWindow: () => ({
@@ -440,7 +440,7 @@ describe("createEventPublisher", () => {
     ]);
   });
 
-  it("publisher_records_drop_on_encoding_failure", async () => {
+  it("when publisher records drop on encoding failure", async () => {
     const dropped: unknown[] = [];
     const decodeFailures: unknown[] = [];
     const sent: Array<{ channel: string; payload: unknown }> = [];
@@ -484,7 +484,7 @@ describe("createEventPublisher", () => {
     ]);
   });
 
-  it("publisher_stop_pauses_dispatch_but_keeps_queue", async () => {
+  it("when publisher stop pauses dispatch but keeps queue", async () => {
     const sent: Array<{ channel: string; payload: unknown }> = [];
     const windowStub = {
       isDestroyed: () => false,
@@ -508,7 +508,7 @@ describe("createEventPublisher", () => {
     expect(publisher.stats()).toEqual({ queued: 1, dropped: 0 });
   });
 
-  it("publisher_restart_resumes_drain", async () => {
+  it("when publisher restart resumes drain", async () => {
     const sent: Array<{ channel: string; payload: unknown }> = [];
     const windowStub = {
       isDestroyed: () => false,
@@ -535,7 +535,7 @@ describe("createEventPublisher", () => {
     expect(publisher.stats()).toEqual({ queued: 0, dropped: 0 });
   });
 
-  it("publisher_publish_after_dispose_is_noop", async () => {
+  it("when publisher publish after dispose is noop", async () => {
     const sent: Array<{ channel: string; payload: unknown }> = [];
     const windowStub = {
       isDestroyed: () => false,
@@ -613,7 +613,7 @@ describe("createEventPublisher", () => {
     expect(sent[0]?.payload).toEqual({ value: 2 });
   });
 
-  it("publisher_dispatch_failure_reports_dispatch_and_drop_diagnostics_consistently", async () => {
+  it("when publisher dispatch failure reports dispatch and drop diagnostics consistently", async () => {
     const dispatchFailures: unknown[] = [];
     const dropped: unknown[] = [];
 
@@ -652,7 +652,7 @@ describe("createEventPublisher", () => {
     });
   });
 
-  it("diagnostics_dispatch_failure_context_shape_is_stable", async () => {
+  it("when diagnostics dispatch failure context shape is stable", async () => {
     const dispatchFailures: Array<Record<string, unknown>> = [];
 
     const publisher = createEventPublisher(contract, {
@@ -682,7 +682,7 @@ describe("createEventPublisher", () => {
     expect(typeof dispatchFailures[0]?.cause).not.toBe("undefined");
   });
 
-  it("diagnostics_dropped_event_context_shape_is_stable", async () => {
+  it("when diagnostics dropped event context shape is stable", async () => {
     const dropped: Array<Record<string, unknown>> = [];
 
     const publisher = createEventPublisher(contract, {
@@ -707,7 +707,7 @@ describe("createEventPublisher", () => {
     });
   });
 
-  it("diagnostics_callbacks_throw_do_not_crash_transport", async () => {
+  it("when diagnostics callbacks throw do not crash transport", async () => {
     const publisher = createEventPublisher(contract, {
       getWindow: () => null,
       diagnostics: {
@@ -726,7 +726,7 @@ describe("createEventPublisher", () => {
     expect(publisher.stats()).toEqual({ queued: 0, dropped: 1 });
   });
 
-  it("success_paths_do_not_emit_failure_diagnostics", async () => {
+  it("when success paths do not emit failure diagnostics", async () => {
     const decodeFailures: unknown[] = [];
     const dispatchFailures: unknown[] = [];
     const dropped: unknown[] = [];
@@ -768,7 +768,7 @@ describe("createEventPublisher", () => {
     expect(dropped).toEqual([]);
   });
 
-  it("publisher_stats_dropped_is_monotonic", async () => {
+  it("when publisher stats dropped is monotonic", async () => {
     const droppedCounts: number[] = [];
     let sendAttempt = 0;
 

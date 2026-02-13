@@ -48,7 +48,7 @@ describe("preload bridge", () => {
     }
   });
 
-  it("createBridgeAdapters_uses_default_prefixes", async () => {
+  it("when createBridgeAdapters uses default prefixes", async () => {
     const adapters = createBridgeAdapters();
 
     await adapters.invoke("Ping", { id: 1 });
@@ -59,7 +59,7 @@ describe("preload bridge", () => {
     expect(onCalls[0]?.channel).toBe("event/Progress");
   });
 
-  it("createBridgeAdapters_uses_custom_prefixes", async () => {
+  it("when createBridgeAdapters uses custom prefixes", async () => {
     const adapters = createBridgeAdapters({
       channelPrefix: { rpc: "rpc-custom/", event: "evt-custom/" },
     });
@@ -72,7 +72,7 @@ describe("preload bridge", () => {
     expect(onCalls[0]?.channel).toBe("evt-custom/Progress");
   });
 
-  it("bridge_invoke_calls_ipcRenderer_invoke_with_prefixed_channel", async () => {
+  it("when bridge invoke calls ipcRenderer invoke with prefixed channel", async () => {
     const adapters = createBridgeAdapters();
 
     await adapters.invoke("DoThing", { ok: true });
@@ -85,7 +85,7 @@ describe("preload bridge", () => {
     ]);
   });
 
-  it("bridge_subscribe_registers_listener_on_prefixed_channel", () => {
+  it("when bridge subscribe registers listener on prefixed channel", () => {
     const adapters = createBridgeAdapters();
     const seen: unknown[] = [];
     adapters.subscribe("Stream", (payload) => {
@@ -99,7 +99,7 @@ describe("preload bridge", () => {
     expect(seen).toEqual([{ tick: 1 }]);
   });
 
-  it("bridge_unsubscribe_removes_exact_wrapped_listener", () => {
+  it("when bridge unsubscribe removes exact wrapped listener", () => {
     const adapters = createBridgeAdapters();
 
     const unsubscribe = adapters.subscribe("Stream", () => {});
@@ -117,7 +117,7 @@ describe("preload bridge", () => {
     });
   });
 
-  it("exposeRpcBridge_exposes_default_globals", () => {
+  it("when exposeRpcBridge exposes default globals", () => {
     exposeRpcBridge();
 
     expect(Object.keys(exposedGlobals).sort()).toEqual(["events", "rpc"]);
@@ -125,7 +125,7 @@ describe("preload bridge", () => {
     expect(typeof exposedGlobals.events?.subscribe).toBe("function");
   });
 
-  it("exposeRpcBridge_exposes_custom_globals", () => {
+  it("when exposeRpcBridge exposes custom globals", () => {
     exposeRpcBridge({
       rpcGlobal: "rpcApi",
       eventsGlobal: "rpcEvents",
@@ -136,7 +136,7 @@ describe("preload bridge", () => {
     expect(typeof exposedGlobals.rpcEvents?.subscribe).toBe("function");
   });
 
-  it("exposeRpcBridge_passes_custom_prefixes_into_adapters", async () => {
+  it("when exposeRpcBridge passes custom prefixes into adapters", async () => {
     exposeRpcBridge({
       rpcGlobal: "rpcApi",
       eventsGlobal: "rpcEvents",

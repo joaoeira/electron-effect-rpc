@@ -80,7 +80,7 @@ describe("createRpcEndpoint", () => {
     expect(handlers.size).toBe(0);
   });
 
-  it("endpoint_rejects_missing_implementation", () => {
+  it("when endpoint rejects missing implementation", () => {
     const { ipcMain } = createIpcMainStub();
 
     expect(() =>
@@ -97,7 +97,7 @@ describe("createRpcEndpoint", () => {
     ).toThrow(/Missing implementation for RPC method: Fail/);
   });
 
-  it("endpoint_rejects_unknown_implementation_key", () => {
+  it("when endpoint rejects unknown implementation key", () => {
     const { ipcMain } = createIpcMainStub();
 
     expect(() =>
@@ -116,7 +116,7 @@ describe("createRpcEndpoint", () => {
     ).toThrow(/unknown RPC method: Extra/);
   });
 
-  it("endpoint_uses_custom_rpc_channel_prefix", () => {
+  it("when endpoint uses custom rpc channel prefix", () => {
     const { ipcMain, handlers } = createIpcMainStub();
 
     const endpoint = createRpcEndpoint(contract, ipcMain, {
@@ -216,7 +216,7 @@ describe("createRpcEndpoint", () => {
     expect(decodeFailures.length).toBe(1);
   });
 
-  it("endpoint_decode_failure_includes_scope_name_payload", async () => {
+  it("when endpoint decode failure includes scope name payload", async () => {
     const { ipcMain, handlers } = createIpcMainStub();
     const decodeFailures: Array<Record<string, unknown>> = [];
 
@@ -245,7 +245,7 @@ describe("createRpcEndpoint", () => {
     expect(decodeFailures[0]?.cause).toBeDefined();
   });
 
-  it("endpoint_returns_defect_for_NoError_typed_failure", async () => {
+  it("when endpoint returns defect for NoError typed failure", async () => {
     const NoErrorMethod = rpc("NoErrorMethod", S.Struct({}), S.Struct({ ok: S.Boolean }));
     const noErrorContract = defineContract({
       methods: [NoErrorMethod] as const,
@@ -270,7 +270,7 @@ describe("createRpcEndpoint", () => {
     }
   });
 
-  it("endpoint_returns_defect_for_effect_die", async () => {
+  it("when endpoint returns defect for effect die", async () => {
     const DieMethod = rpc("DieMethod", S.Struct({}), S.Struct({ ok: S.Boolean }));
     const dieContract = defineContract({
       methods: [DieMethod] as const,
@@ -294,7 +294,7 @@ describe("createRpcEndpoint", () => {
     }
   });
 
-  it("endpoint_returns_defect_for_effect_interrupt", async () => {
+  it("when endpoint returns defect for effect interrupt", async () => {
     const InterruptMethod = rpc(
       "InterruptMethod",
       S.Struct({}),
@@ -322,7 +322,7 @@ describe("createRpcEndpoint", () => {
     }
   });
 
-  it("endpoint_reports_protocol_error_on_success_encode_failure", async () => {
+  it("when endpoint reports protocol error on success encode failure", async () => {
     const SuccessEncodeBreak = rpc(
       "SuccessEncodeBreak",
       S.Struct({}),
@@ -354,7 +354,7 @@ describe("createRpcEndpoint", () => {
     expect(protocolErrors).toHaveLength(1);
   });
 
-  it("endpoint_reports_protocol_error_on_failure_encode_failure", async () => {
+  it("when endpoint reports protocol error on failure encode failure", async () => {
     const FailureEncodeBreak = rpc(
       "FailureEncodeBreak",
       S.Struct({}),
@@ -387,7 +387,7 @@ describe("createRpcEndpoint", () => {
     expect(protocolErrors).toHaveLength(1);
   });
 
-  it("diagnostics_decode_failure_context_shape_is_stable", async () => {
+  it("when diagnostics decode failure context shape is stable", async () => {
     const { ipcMain, handlers } = createIpcMainStub();
     const decodeFailures: Array<Record<string, unknown>> = [];
 
@@ -416,7 +416,7 @@ describe("createRpcEndpoint", () => {
     expect(typeof decodeFailures[0]?.cause).not.toBe("undefined");
   });
 
-  it("diagnostics_protocol_error_context_shape_is_stable", async () => {
+  it("when diagnostics protocol error context shape is stable", async () => {
     const Broken = rpc("Broken", S.Struct({}), S.Struct({ sum: S.Number }));
     const brokenContract = defineContract({
       methods: [Broken] as const,
@@ -448,7 +448,7 @@ describe("createRpcEndpoint", () => {
     expect(typeof protocolErrors[0]?.cause).not.toBe("undefined");
   });
 
-  it("diagnostics_callbacks_throw_do_not_crash_transport", async () => {
+  it("when diagnostics callbacks throw do not crash transport", async () => {
     const Broken = rpc("Broken", S.Struct({}), S.Struct({ sum: S.Number }));
     const brokenContract = defineContract({
       methods: [Broken] as const,
@@ -477,7 +477,7 @@ describe("createRpcEndpoint", () => {
     });
   });
 
-  it("success_paths_do_not_emit_failure_diagnostics", async () => {
+  it("when success paths do not emit failure diagnostics", async () => {
     const { ipcMain, handlers } = createIpcMainStub();
     const decodeFailures: unknown[] = [];
     const protocolErrors: unknown[] = [];
@@ -559,7 +559,7 @@ describe("createRpcEndpoint", () => {
     expect(() => endpoint.start()).toThrow(/disposed/i);
   });
 
-  it("endpoint_start_idempotent_when_running", () => {
+  it("when endpoint start idempotent when running", () => {
     const handleCalls: string[] = [];
     const removeCalls: string[] = [];
 
@@ -587,7 +587,7 @@ describe("createRpcEndpoint", () => {
     expect(removeCalls).toHaveLength(0);
   });
 
-  it("endpoint_stop_idempotent_when_stopped", () => {
+  it("when endpoint stop idempotent when stopped", () => {
     const removeCalls: string[] = [];
 
     const ipcMain: IpcMainLike = {
@@ -612,7 +612,7 @@ describe("createRpcEndpoint", () => {
     expect(removeCalls).toEqual(expect.arrayContaining(["rpc/Add", "rpc/Fail"]));
   });
 
-  it("endpoint_runtime_is_used_for_effect_execution", async () => {
+  it("when endpoint runtime is used for effect execution", async () => {
     class Offset extends Context.Tag("Offset")<Offset, number>() {}
 
     const WithRuntime = rpc(
@@ -650,7 +650,7 @@ describe("createRpcEndpoint", () => {
     });
   });
 
-  it("endpoint_handles_parallel_invocations_without_cross_talk", async () => {
+  it("when endpoint handles parallel invocations without cross talk", async () => {
     const Parallel = rpc(
       "Parallel",
       S.Struct({ a: S.Number, b: S.Number }),

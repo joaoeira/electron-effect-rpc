@@ -10,7 +10,7 @@ const FooMethod = rpc("Foo", EmptyRequest, EmptyResponse);
 const BarEvent = event("Bar", EmptyEventPayload);
 
 describe("defineContract", () => {
-  it("contract_accepts_empty_methods_and_events", () => {
+  it("when contract accepts empty methods and events", () => {
     const contract = defineContract({
       methods: [] as const,
       events: [] as const,
@@ -20,7 +20,7 @@ describe("defineContract", () => {
     expect(contract.events).toEqual([]);
   });
 
-  it("contract_preserves_method_and_event_order", () => {
+  it("when contract preserves method and event order", () => {
     const FirstMethod = rpc("First", S.Struct({}), S.Struct({}));
     const SecondMethod = rpc("Second", S.Struct({}), S.Struct({}));
     const FirstEvent = event("FirstEvent", S.Struct({}));
@@ -41,7 +41,7 @@ describe("defineContract", () => {
     ]);
   });
 
-  it("contract_accepts_non_duplicate_same_shape_entries", () => {
+  it("when contract accepts non duplicate same shape entries", () => {
     const Alpha = rpc("Alpha", S.Struct({ value: S.Number }), S.Struct({ ok: S.Boolean }));
     const Beta = rpc("Beta", S.Struct({ value: S.Number }), S.Struct({ ok: S.Boolean }));
     const Tick = event("Tick", S.Struct({ value: S.Number }));
