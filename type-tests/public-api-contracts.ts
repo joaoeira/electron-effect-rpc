@@ -1,0 +1,118 @@
+import * as S from "@effect/schema/Schema";
+import { Effect } from "effect";
+import { defineContract, event, rpc, type RpcError } from "../src/contract.ts";
+import { createEventPublisher } from "../src/main.ts";
+import { createEventSubscriber, createRpcClient } from "../src/renderer.ts";
+import type { Implementations, RpcClient } from "../src/types.ts";
+
+class AccessDeniedError extends S.TaggedError<AccessDeniedError>()(
+  "AccessDeniedError",
+  {
+    message: S.String,
+  }
+) {}
+
+const EmptyReq = rpc("EmptyReq", S.Struct({}), S.String);
+const NeedsReq = rpc("NeedsReq", S.Struct({ value: S.Number }), S.String);
+const NullReq = rpc("NullReq", S.Null, S.String);
+const NoErr = rpc("NoErr", S.Struct({}), S.String);
+const WithErr = rpc("WithErr", S.Struct({}), S.String, AccessDeniedError);
+const Progress = event("Progress", S.Struct({ value: S.Number, label: S.String }));
+
+const contract = defineContract({
+  methods: [EmptyReq, NeedsReq, NullReq, NoErr, WithErr] as const,
+  events: [Progress] as const,
+});
+
+const invoke = async (_method: string, _payload: unknown) =>
+  ({ type: "success", data: "ok" }) as const;
+const client = createRpcClient(contract, { invoke });
+
+// rpcCaller_zero_arg_only_for_empty_object_requests
+client.EmptyReq();
+// @ts-expect-error Empty object request callers are zero-arg.
+client.EmptyReq({});
+
+// rpcCaller_requires_arg_for_non_empty_requests
+client.NeedsReq({ value: 1 });
+// @ts-expect-error Non-empty request must be provided.
+client.NeedsReq();
+
+// rpcCaller_accepts_null_when_schema_null
+client.NullReq(null);
+// @ts-expect-error Null request must not allow omitted input.
+client.NullReq();
+
+// implementations_require_all_contract_methods
+const implementationsOk: Implementations<typeof contract> = {
+  EmptyReq: () => Effect.succeed("ok"),
+  NeedsReq: ({ value }) => Effect.succeed(String(value)),
+  NullReq: () => Effect.succeed("ok"),
+  NoErr: () => Effect.succeed("ok"),
+  WithErr: () => Effect.fail(new AccessDeniedError({ message: "denied" })),
+};
+void implementationsOk;
+
+// implementations_reject_extra_keys
+const implementationsExtra: Implementations<typeof contract> = {
+  EmptyReq: () => Effect.succeed("ok"),
+  NeedsReq: ({ value }) => Effect.succeed(String(value)),
+  NullReq: () => Effect.succeed("ok"),
+  NoErr: () => Effect.succeed("ok"),
+  WithErr: () => Effect.fail(new AccessDeniedError({ message: "denied" })),
+  // @ts-expect-error Extra implementation key should be rejected.
+  Extra: () => Effect.succeed("extra"),
+};
+void implementationsExtra;
+
+// @ts-expect-error Missing implementation key should be rejected.
+const implementationsMissing: Implementations<typeof contract> = {
+  EmptyReq: () => Effect.succeed("ok"),
+  NeedsReq: ({ value }) => Effect.succeed(String(value)),
+  NullReq: () => Effect.succeed("ok"),
+  NoErr: () => Effect.succeed("ok"),
+};
+void implementationsMissing;
+
+// rpcClient_method_names_match_contract_only
+const typedClient: RpcClient<typeof contract> = client;
+typedClient.EmptyReq();
+// @ts-expect-error Method not in contract should not exist.
+typedClient.NotInContract();
+
+// event_subscriber_payload_inference_is_exact
+const subscriber = createEventSubscriber(contract, {
+  subscribe: () => () => {},
+});
+subscriber.subscribe(Progress, (payload) => {
+  const value: number = payload.value;
+  const label: string = payload.label;
+  void value;
+  void label;
+});
+subscriber.subscribe(Progress, (payload) => {
+  // @ts-expect-error payload.value is number, not string.
+  const wrong: string = payload.value;
+  void wrong;
+});
+
+// event_publisher_payload_inference_is_exact
+const publisher = createEventPublisher(contract, {
+  getWindow: () => null,
+});
+publisher.publish(Progress, { value: 1, label: "progress" });
+// @ts-expect-error Missing required "label" field.
+publisher.publish(Progress, { value: 1 });
+// @ts-expect-error Wrong type for "value" field.
+publisher.publish(Progress, { value: "1", label: "progress" });
+
+type Assert<T extends true> = T;
+type IsNever<T> = [T] extends [never] ? true : false;
+
+// NoError_methods_have_never_error_channel
+type _NoErrIsNever = Assert<IsNever<RpcError<typeof NoErr>>>;
+type _WithErrIsNotNever = Assert<
+  IsNever<RpcError<typeof WithErr>> extends false ? true : false
+>;
+void (0 as unknown as _NoErrIsNever);
+void (0 as unknown as _WithErrIsNotNever);

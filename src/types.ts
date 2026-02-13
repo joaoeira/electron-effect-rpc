@@ -43,7 +43,11 @@ export type Implementations<
   >;
 };
 
-type IsEmptyObject<T> = keyof T extends never ? true : false;
+type IsEmptyObject<T> = T extends object
+  ? keyof T extends never
+    ? true
+    : false
+  : false;
 
 export type RpcCaller<M extends AnyMethod> =
   IsEmptyObject<RpcInput<M>> extends true
