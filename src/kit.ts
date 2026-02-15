@@ -73,10 +73,6 @@ export type IpcMainHandle<
     event: E,
     payload: RpcEventPayload<E>
   ) => Effect.Effect<void, never>;
-  readonly emit: <E extends C["events"][number]>(
-    event: E,
-    payload: RpcEventPayload<E>
-  ) => Promise<void>;
   readonly stats: () => {
     readonly queued: number;
     readonly dropped: number;
@@ -205,13 +201,6 @@ export function createIpcKit<
       return publisher.publish(event, payload);
     }
 
-    function emit<E extends RpcContract<Methods, Events>["events"][number]>(
-      event: E,
-      payload: RpcEventPayload<E>
-    ): Promise<void> {
-      return Effect.runPromise(publisher.publish(event, payload));
-    }
-
     return {
       endpoint,
       publisher,
@@ -220,7 +209,6 @@ export function createIpcKit<
       dispose,
       isRunning,
       publish,
-      emit,
       stats: publisher.stats,
     };
   };

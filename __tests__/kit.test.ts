@@ -127,8 +127,9 @@ describe("createIpcKit", () => {
       seen.push(payload);
     });
 
-    await expect(renderer.client.Ping()).resolves.toEqual({ ok: true });
-    await main.emit(Progress, { step: 1 });
+    const ping = await Effect.runPromise(renderer.client.Ping());
+    expect(ping).toEqual({ ok: true });
+    await Effect.runPromise(main.publish(Progress, { step: 1 }));
     await waitFor(() => seen.length === 1);
 
     expect(seen).toEqual([{ step: 1 }]);
@@ -178,7 +179,7 @@ describe("createIpcKit", () => {
     expect(() => main.start()).toThrow(/disposed/i);
   });
 
-  it("when emitting through both APIs, then emit and publish both dispatch events", async () => {
+  it("when publishing from main handle, then events dispatch to renderer subscribers", async () => {
     const Progress = event("Progress", S.Struct({ value: S.Number }));
     const contract = defineContract({
       methods: [] as const,
@@ -207,10 +208,9 @@ describe("createIpcKit", () => {
       seen.push(payload.value);
     });
 
-    await main.emit(Progress, { value: 1 });
-    await Effect.runPromise(main.publish(Progress, { value: 2 }));
-    await waitFor(() => seen.length === 2);
+    await Effect.runPromise(main.publish(Progress, { value: 1 }));
+    await waitFor(() => seen.length === 1);
 
-    expect(seen).toEqual([1, 2]);
+    expect(seen).toEqual([1]);
   });
 });

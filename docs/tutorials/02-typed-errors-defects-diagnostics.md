@@ -42,28 +42,29 @@ DeleteFile: ({ path }) => {
 };
 ```
 
-In renderer, a typed failure is thrown as the same error class.
+In renderer, a typed failure appears in the Effect error channel as the same
+error class.
 
 ```ts
+import { Effect } from "effect";
 import { RpcDefectError } from "electron-effect-rpc/renderer";
 
-try {
-  await client.DeleteFile({ path: "/tmp/file.txt" });
-} catch (error) {
-  if (error instanceof AccessDeniedError) {
-    // expected domain path
-    console.warn(error.message);
-    return;
-  }
-
-  if (error instanceof RpcDefectError) {
-    // unexpected defect path
-    console.error(error.message, error.cause);
-    return;
-  }
-
-  throw error;
-}
+await Effect.runPromise(
+  client.DeleteFile({ path: "/tmp/file.txt" }).pipe(
+    Effect.catchTag("AccessDeniedError", (error) =>
+      Effect.sync(() => {
+        // expected domain path
+        console.warn(error.message);
+      })
+    ),
+    Effect.catchTag("RpcDefectError", (error: RpcDefectError) =>
+      Effect.sync(() => {
+        // unexpected defect path
+        console.error(error.code, error.message, error.cause);
+      })
+    )
+  )
+);
 ```
 
 ## Defects are intentionally different

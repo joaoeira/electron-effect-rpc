@@ -1,5 +1,5 @@
 import * as S from "@effect/schema/Schema";
-import { Cause, Exit } from "effect";
+import { Cause, Effect, Exit } from "effect";
 import {
   exitSchemaFor,
   isNoErrorSchema,
@@ -8,7 +8,12 @@ import {
   type RpcInput,
   type RpcOutput,
 } from "./contract.ts";
-import { formatUnknown, parseRpcResponseEnvelope, safelyCall } from "./protocol.ts";
+import {
+  formatUnknown,
+  parseRpcResponseEnvelope,
+  safelyCall,
+  type RpcResponseEnvelope,
+} from "./protocol.ts";
 import {
   RpcDefectError,
   type AnyEvent,
@@ -21,6 +26,7 @@ import {
   type RpcClient,
   type RpcClientOptions,
   type RpcInvoke,
+  type RpcMethodError,
 } from "./types.ts";
 
 function requireInvoke(options?: RpcClientOptions): RpcInvoke {
@@ -43,36 +49,52 @@ type MutableRpcClient<
   -readonly [Name in keyof RpcClient<C>]: RpcClient<C>[Name];
 };
 
+function rpcDefect(
+  code: RpcDefectError["code"],
+  message: string,
+  cause: unknown
+): RpcDefectError {
+  return new RpcDefectError(code, message, cause);
+}
+
 function decodeLegacyExit<M extends AnyMethod>(
   method: M,
   raw: unknown
-): RpcOutput<M> {
-  const exitSchema = exitSchemaFor(method);
-  const decodeExit = S.decodeUnknownSync(exitSchema);
-  const exit = decodeExit(raw);
+): Effect.Effect<RpcOutput<M>, RpcMethodError<M>> {
+  return Effect.try({
+    try: () => S.decodeUnknownSync(exitSchemaFor(method))(raw),
+    catch: (cause) =>
+      rpcDefect(
+        "legacy_decode_failed",
+        `RPC ${method.name} legacy response decoding failed: ${formatUnknown(cause)}`,
+        cause
+      ),
+  }).pipe(
+    Effect.flatMap((exit) => {
+      if (Exit.isSuccess(exit)) {
+        return Effect.succeed(exit.value);
+      }
 
-  if (Exit.isSuccess(exit)) {
-    return exit.value;
-  }
+      const failureOption = Cause.failureOption(exit.cause);
+      if (failureOption._tag === "Some") {
+        return Effect.fail(failureOption.value as RpcMethodError<M>);
+      }
 
-  const failureOption = Cause.failureOption(exit.cause);
-  if (failureOption._tag === "Some") {
-    throw failureOption.value;
-  }
+      const defectOption = Cause.dieOption(exit.cause);
+      if (defectOption._tag === "Some") {
+        const defect = defectOption.value;
+        const message = defect instanceof Error ? defect.message : String(defect);
+        return Effect.fail(rpcDefect("remote_defect", message, defect));
+      }
 
-  const defectOption = Cause.dieOption(exit.cause);
-  if (defectOption._tag === "Some") {
-    const defect = defectOption.value;
-    if (defect instanceof Error) {
-      throw new RpcDefectError(defect.message, defect);
-    }
-
-    throw new RpcDefectError(String(defect), defect);
-  }
-
-  throw new RpcDefectError(
-    "RPC call was interrupted or failed unexpectedly",
-    exit.cause
+      return Effect.fail(
+        rpcDefect(
+          "remote_defect",
+          "RPC call was interrupted or failed unexpectedly",
+          exit.cause
+        )
+      );
+    })
   );
 }
 
@@ -87,49 +109,15 @@ export function createRpcClient<
   const diagnostics = options?.diagnostics;
   const decodeMode = options?.rpcDecodeMode ?? "envelope";
 
-  const call = async <M extends Methods[number]>(
+  const decodeEnvelope = <M extends Methods[number]>(
     method: M,
-    input: RpcInput<M>
-  ): Promise<RpcOutput<M>> => {
-    let encoded: unknown;
-    try {
-      encoded = S.encodeSync(method.req)(input);
-    } catch (cause) {
-      safelyCall(diagnostics?.onDecodeFailure, {
-        scope: "rpc-request",
-        name: method.name,
-        payload: input,
-        cause,
-      });
-
-      throw new Error(
-        `RPC ${method.name} request encoding failed: ${formatUnknown(cause)}`
-      );
-    }
-
-    let raw: unknown;
-    try {
-      raw = await invoke(method.name, encoded);
-    } catch (cause) {
-      safelyCall(diagnostics?.onProtocolError, {
-        method: method.name,
-        response: undefined,
-        cause,
-      });
-
-      throw new RpcDefectError(
-        `RPC ${method.name} invoke failed: ${formatUnknown(cause)}`,
-        cause
-      );
-    }
-
-    const envelope = parseRpcResponseEnvelope(raw);
-    if (envelope) {
-      switch (envelope.type) {
-        case "success":
-          try {
-            return S.decodeUnknownSync(method.res)(envelope.data);
-          } catch (cause) {
+    envelope: RpcResponseEnvelope
+  ): Effect.Effect<RpcOutput<M>, RpcMethodError<M>> => {
+    switch (envelope.type) {
+      case "success":
+        return Effect.try({
+          try: () => S.decodeUnknownSync(method.res)(envelope.data),
+          catch: (cause) => {
             safelyCall(diagnostics?.onDecodeFailure, {
               scope: "rpc-response",
               name: method.name,
@@ -137,23 +125,29 @@ export function createRpcClient<
               cause,
             });
 
-            throw new Error(
-              `RPC ${method.name} success payload decoding failed: ${formatUnknown(cause)}`
+            return rpcDefect(
+              "success_payload_decoding_failed",
+              `RPC ${method.name} success payload decoding failed: ${formatUnknown(cause)}`,
+              cause
             );
-          }
+          },
+        });
 
-        case "failure":
-          if (isNoErrorSchema(method.err)) {
-            throw new RpcDefectError(
+      case "failure":
+        if (isNoErrorSchema(method.err)) {
+          return Effect.fail(
+            rpcDefect(
+              "noerror_contract_violation",
               `RPC ${method.name} received a failure for a method that declares NoError`,
               envelope.error
-            );
-          }
+            )
+          );
+        }
 
-          let decodedError: unknown;
-          try {
-            decodedError = S.decodeUnknownSync(method.err)(envelope.error.data);
-          } catch (cause) {
+        const errorSchema = method.err as S.Schema.AnyNoContext;
+        return Effect.try({
+          try: () => S.decodeUnknownSync(errorSchema)(envelope.error.data),
+          catch: (cause) => {
             safelyCall(diagnostics?.onDecodeFailure, {
               scope: "rpc-response",
               name: method.name,
@@ -161,55 +155,117 @@ export function createRpcClient<
               cause,
             });
 
-            throw new Error(
-              `RPC ${method.name} failure payload decoding failed: ${formatUnknown(cause)}`
+            return rpcDefect(
+              "failure_payload_decoding_failed",
+              `RPC ${method.name} failure payload decoding failed: ${formatUnknown(cause)}`,
+              cause
             );
-          }
+          },
+        }).pipe(
+          Effect.flatMap((decodedError) =>
+            Effect.fail(decodedError as RpcMethodError<M>)
+          )
+        );
 
-          throw decodedError;
-
-        case "defect":
-          throw new RpcDefectError(envelope.message, envelope.cause);
-      }
+      case "defect":
+        return Effect.fail(
+          rpcDefect("remote_defect", envelope.message, envelope.cause)
+        );
     }
+  };
 
-    if (decodeMode === "dual") {
-      try {
-        return decodeLegacyExit(method, raw);
-      } catch (cause) {
+  const call = <M extends Methods[number]>(
+    method: M,
+    input: RpcInput<M>
+  ): Effect.Effect<RpcOutput<M>, RpcMethodError<M>> =>
+    Effect.try({
+      try: () => S.encodeSync(method.req)(input),
+      catch: (cause) => {
+        safelyCall(diagnostics?.onDecodeFailure, {
+          scope: "rpc-request",
+          name: method.name,
+          payload: input,
+          cause,
+        });
+
+        return rpcDefect(
+          "request_encoding_failed",
+          `RPC ${method.name} request encoding failed: ${formatUnknown(cause)}`,
+          cause
+        );
+      },
+    }).pipe(
+      Effect.flatMap((encoded) =>
+        Effect.tryPromise({
+          try: () => invoke(method.name, encoded),
+          catch: (cause) => {
+            safelyCall(diagnostics?.onProtocolError, {
+              method: method.name,
+              response: undefined,
+              cause,
+            });
+
+            return rpcDefect(
+              "invoke_failed",
+              `RPC ${method.name} invoke failed: ${formatUnknown(cause)}`,
+              cause
+            );
+          },
+        })
+      ),
+      Effect.flatMap((raw) => {
+        const envelope = parseRpcResponseEnvelope(raw);
+        if (envelope) {
+          return decodeEnvelope(method, envelope);
+        }
+
+        if (decodeMode === "dual") {
+          return decodeLegacyExit(method, raw).pipe(
+            Effect.tapError((cause) => {
+              if (
+                cause instanceof RpcDefectError &&
+                cause.code === "legacy_decode_failed"
+              ) {
+                return Effect.sync(() =>
+                  safelyCall(diagnostics?.onProtocolError, {
+                    method: method.name,
+                    response: raw,
+                    cause,
+                  })
+                );
+              }
+
+              return Effect.void;
+            })
+          );
+        }
+
+        const cause = rpcDefect(
+          "invalid_response_envelope",
+          `RPC ${method.name} response was not a valid envelope.`,
+          raw
+        );
         safelyCall(diagnostics?.onProtocolError, {
           method: method.name,
           response: raw,
           cause,
         });
 
-        throw cause;
-      }
-    }
-
-    const cause = new Error(`RPC ${method.name} response was not a valid envelope.`);
-    safelyCall(diagnostics?.onProtocolError, {
-      method: method.name,
-      response: raw,
-      cause,
-    });
-
-    throw cause;
-  };
+        return Effect.fail(cause);
+      })
+    );
 
   const client: MutableRpcClient<RpcContract<Methods, Events>> =
     Object.create(null);
   const clientRecord: Record<string, unknown> = client;
 
   for (const method of contract.methods) {
-    const decodeDefaultInput = S.decodeUnknownSync(method.req);
-
     const caller: RpcCaller<typeof method> = (
       ...args: [RpcInput<typeof method>?]
     ) => {
       const payload =
         args.length === 0
-          ? decodeDefaultInput({})
+          ? ({} as RpcInput<typeof method>)
           : (args[0] as RpcInput<typeof method>);
       return call(method, payload);
     };

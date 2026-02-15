@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import type * as Fx from "effect/Effect";
 import * as Runtime from "effect/Runtime";
 import { createIpcKit, defineContract, event, rpc } from "../src/index.ts";
-import type { IpcMainLike } from "../src/types.ts";
+import type { IpcMainLike, RpcDefectError } from "../src/types.ts";
 
 const Ping = rpc("Ping", S.Struct({}), S.Struct({ ok: S.Boolean }));
 const Echo = rpc(
@@ -44,8 +44,12 @@ const bridge = {
 };
 
 const { client, events } = kit.renderer(bridge);
-client.Ping();
-client.Echo({ message: "hello" });
+const pingEffect: Fx.Effect<{ ok: boolean }, RpcDefectError> = client.Ping();
+const echoEffect: Fx.Effect<{ echoed: string }, RpcDefectError> = client.Echo({
+  message: "hello",
+});
+void pingEffect;
+void echoEffect;
 // @ts-expect-error Non-empty request must be provided.
 client.Echo();
 
@@ -79,11 +83,9 @@ const mainOk = kit.main({
   getWindow: () => null,
 });
 
-const emitPromise: Promise<void> = mainOk.emit(Progress, { value: 1 });
 const publishEffect: Fx.Effect<void, never> = mainOk.publish(Progress, {
-  value: 2,
+  value: 1,
 });
-void emitPromise;
 void publishEffect;
 
 kit.main({

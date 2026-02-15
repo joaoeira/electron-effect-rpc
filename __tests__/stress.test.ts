@@ -68,12 +68,13 @@ describe("stress", () => {
     const total = 500;
 
     const results = await Promise.all(
-      Array.from({ length: total }, (_, i) =>
-        client.Add({ a: i, b: i * 2 }).then((result) => ({
+      Array.from({ length: total }, async (_, i) => {
+        const result = await Effect.runPromise(client.Add({ a: i, b: i * 2 }));
+        return {
           index: i,
           sum: result.sum,
-        }))
-      )
+        };
+      })
     );
 
     for (const result of results) {

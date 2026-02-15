@@ -13,7 +13,7 @@ ESM-capable build pipeline.
 - Single shared contract for methods and events.
 - Single shared kit config to eliminate cross-process prefix drift.
 - End-to-end schema validation at IPC boundaries.
-- Promise-based renderer RPC with typed domain errors.
+- Effect-first renderer RPC with typed domain and defect channels.
 - Effect-native main handlers with explicit runtime injection.
 - Explicit lifecycle handles and bounded event queue backpressure.
 - Structured diagnostics hooks for decode/protocol/dispatch failures.
@@ -81,14 +81,11 @@ const mainRpc = ipc.main({
 
 mainRpc.start();
 
-void mainRpc.emit(WorkUnitProgress, {
+void Effect.runPromise(mainRpc.publish(WorkUnitProgress, {
   requestId: "req-1",
   chunk: "starting",
   done: false,
-});
-
-// Effect-native alternative:
-// void Effect.runPromise(mainRpc.publish(WorkUnitProgress, {...}));
+}));
 ```
 
 ### 3) Preload
@@ -102,10 +99,11 @@ This exposes one global by default: `window.api`.
 
 ### 4) Renderer
 ```ts
+import { Effect } from "effect";
 import { ipc, WorkUnitProgress } from "./shared-ipc.ts";
 
 const { client, events } = ipc.renderer(window.api);
-const { version } = await client.GetAppVersion();
+const { version } = await Effect.runPromise(client.GetAppVersion());
 
 const unsubscribe = events.subscribe(WorkUnitProgress, (payload) => {
   console.log(payload.chunk);
@@ -130,9 +128,33 @@ declare global {
 
 ## Error Model
 
-Domain failures are modeled with tagged error schemas and are re-thrown in the
-renderer as those same error classes. Unexpected failures, transport defects,
-and protocol mismatches are surfaced as `RpcDefectError`.
+Domain failures are modeled with tagged error schemas and are surfaced in the
+Effect error channel as those same tagged values. Unexpected failures,
+transport defects, and protocol mismatches are surfaced as `RpcDefectError`,
+which includes a stable `code` discriminator:
+`request_encoding_failed`, `invoke_failed`,
+`success_payload_decoding_failed`, `failure_payload_decoding_failed`,
+`noerror_contract_violation`, `invalid_response_envelope`,
+`legacy_decode_failed`, and `remote_defect`.
+
+## Breaking Changes
+
+Renderer RPC methods now return `Effect.Effect` instead of `Promise`, and
+`IpcMainHandle.emit` was removed in favor of `publish`.
+
+Before:
+
+```ts
+const result = await client.GetAppVersion();
+await mainRpc.emit(WorkUnitProgress, payload);
+```
+
+After:
+
+```ts
+const result = await Effect.runPromise(client.GetAppVersion());
+await Effect.runPromise(mainRpc.publish(WorkUnitProgress, payload));
+```
 
 ## Low-Level APIs (Still Supported)
 

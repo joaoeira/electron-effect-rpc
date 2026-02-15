@@ -49,10 +49,35 @@ type IsEmptyObject<T> = T extends object
     : false
   : false;
 
+export type RpcDefectCode =
+  | "request_encoding_failed"
+  | "invoke_failed"
+  | "success_payload_decoding_failed"
+  | "failure_payload_decoding_failed"
+  | "noerror_contract_violation"
+  | "invalid_response_envelope"
+  | "legacy_decode_failed"
+  | "remote_defect";
+
+export class RpcDefectError extends Error {
+  readonly _tag = "RpcDefectError";
+
+  constructor(
+    public readonly code: RpcDefectCode,
+    message: string,
+    public readonly cause: unknown
+  ) {
+    super(message);
+    this.name = "RpcDefectError";
+  }
+}
+
+export type RpcMethodError<M extends AnyMethod> = RpcError<M> | RpcDefectError;
+
 export type RpcCaller<M extends AnyMethod> =
   IsEmptyObject<RpcInput<M>> extends true
-    ? () => Promise<RpcOutput<M>>
-    : (input: RpcInput<M>) => Promise<RpcOutput<M>>;
+    ? () => Effect.Effect<RpcOutput<M>, RpcMethodError<M>>
+    : (input: RpcInput<M>) => Effect.Effect<RpcOutput<M>, RpcMethodError<M>>;
 
 export type RpcClient<
   C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[]>
@@ -61,18 +86,6 @@ export type RpcClient<
     ExtractMethod<C["methods"], Name>
   >;
 };
-
-export class RpcDefectError extends Error {
-  readonly _tag = "RpcDefectError";
-
-  constructor(
-    message: string,
-    public readonly cause: unknown
-  ) {
-    super(message);
-    this.name = "RpcDefectError";
-  }
-}
 
 export type ChannelPrefix = {
   readonly rpc: string;

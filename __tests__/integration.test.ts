@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import * as S from "@effect/schema/Schema";
-import { Effect } from "effect";
+import { Cause, Effect, Exit } from "effect";
 import * as Runtime from "effect/Runtime";
 import { defineContract, event, rpc } from "../src/contract.ts";
 import { createEventPublisher, createRpcEndpoint } from "../src/main.ts";
@@ -132,9 +132,28 @@ describe("integration", () => {
 
     const client = createRpcClient(contract, { invoke });
 
-    await expect(client.Add({ a: 2, b: 3 })).resolves.toEqual({ sum: 5 });
-    await expect(client.Fail()).rejects.toBeInstanceOf(AccessDeniedError);
-    await expect(client.Crash()).rejects.toBeInstanceOf(RpcDefectError);
+    const add = await Effect.runPromise(client.Add({ a: 2, b: 3 }));
+    expect(add).toEqual({ sum: 5 });
+
+    const failExit = await Effect.runPromiseExit(client.Fail());
+    if (Exit.isSuccess(failExit)) {
+      throw new Error("Expected typed failure.");
+    }
+    const failCause = Cause.failureOption(failExit.cause);
+    if (failCause._tag !== "Some") {
+      throw new Error("Expected regular failure cause.");
+    }
+    expect(failCause.value).toBeInstanceOf(AccessDeniedError);
+
+    const crashExit = await Effect.runPromiseExit(client.Crash());
+    if (Exit.isSuccess(crashExit)) {
+      throw new Error("Expected defect failure.");
+    }
+    const crashFailure = Cause.failureOption(crashExit.cause);
+    if (crashFailure._tag !== "Some") {
+      throw new Error("Expected regular failure cause.");
+    }
+    expect(crashFailure.value).toBeInstanceOf(RpcDefectError);
   });
 
   it("when main, preload, and renderer use matching custom prefixes, then rpc and event routing works end-to-end", async () => {
@@ -172,7 +191,8 @@ describe("integration", () => {
     });
 
     const client = createRpcClient(contract, { invoke });
-    await expect(client.Ping()).resolves.toEqual({ ok: true });
+    const ping = await Effect.runPromise(client.Ping());
+    expect(ping).toEqual({ ok: true });
 
     await Effect.runPromise(publisher.publish(Progress, { step: 1 }));
     await waitFor(() => seen.length === 1);

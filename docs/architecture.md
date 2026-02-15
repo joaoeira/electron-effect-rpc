@@ -15,8 +15,9 @@ envelope-shaped response. On the main side, `createRpcEndpoint` in `src/main.ts`
 decodes the request, executes an `Effect` handler using an injected runtime, and
 encodes the result back into a response envelope. That envelope can represent a
 successful domain result, a typed domain failure, or a defect. Back in the
-renderer, the response is parsed and decoded into either a resolved value, a
-typed thrown error, or an `RpcDefectError`.
+renderer, the response is parsed and decoded into an `Effect` that succeeds
+with the domain result, fails with a typed domain error, or fails with
+`RpcDefectError`.
 
 Events follow the opposite direction. Main process code publishes an event and
 payload, and the publisher enqueues it into a bounded buffer. Once started, the

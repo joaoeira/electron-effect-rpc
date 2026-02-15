@@ -107,6 +107,7 @@ consistently in main, preload, and renderer.
 In renderer code, build typed helpers from the same contract.
 
 ```ts
+import { Effect } from "effect";
 import { createEventSubscriber, createRpcClient } from "electron-effect-rpc/renderer";
 import { contract, WorkUnitProgress } from "./contract.ts";
 
@@ -119,7 +120,7 @@ const events = createEventSubscriber(contract, {
   decodeMode: "safe",
 });
 
-const result = await client.GetAppVersion();
+const result = await Effect.runPromise(client.GetAppVersion());
 console.log(result.version);
 
 const unsubscribe = events.subscribe(WorkUnitProgress, (payload) => {

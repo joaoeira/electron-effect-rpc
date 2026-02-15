@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import * as S from "@effect/schema/Schema";
-import { Effect } from "effect";
+import { Cause, Effect, Exit } from "effect";
 import { defineContract, exitSchemaFor, rpc } from "../src/contract.ts";
 import { createRpcClient, RpcDefectError } from "../src/renderer.ts";
 import { createInvokeStub } from "../src/testing.ts";
@@ -11,6 +11,27 @@ class AccessDeniedError extends S.TaggedError<AccessDeniedError>()(
     message: S.String,
   }
 ) {}
+
+function expectFailure<E>(exit: Exit.Exit<unknown, E>): E {
+  if (Exit.isSuccess(exit)) {
+    throw new Error("Expected exit failure.");
+  }
+
+  const failure = Cause.failureOption(exit.cause);
+  if (failure._tag !== "Some") {
+    throw new Error("Expected a regular failure in Cause.");
+  }
+
+  return failure.value;
+}
+
+function expectRpcDefect<E>(
+  exit: Exit.Exit<unknown, E>
+): RpcDefectError {
+  const failure = expectFailure(exit as Exit.Exit<unknown, RpcDefectError>);
+  expect(failure).toBeInstanceOf(RpcDefectError);
+  return failure as RpcDefectError;
+}
 
 describe("createRpcClient", () => {
   const Add = rpc(
@@ -51,7 +72,7 @@ describe("createRpcClient", () => {
     }));
 
     const client = createRpcClient(contract, { invoke });
-    const result = await client.Add({ a: 1, b: 2 });
+    const result = await Effect.runPromise(client.Add({ a: 1, b: 2 }));
 
     expect(result).toEqual({ sum: 3 });
     expect(invoke.invocations).toEqual([
@@ -78,7 +99,7 @@ describe("createRpcClient", () => {
     }));
 
     const client = createRpcClient(specialContract, { invoke });
-    await client["system/get.version"]();
+    await Effect.runPromise(client["system/get.version"]());
 
     expect(invoke.invocations).toEqual([
       {
@@ -95,7 +116,7 @@ describe("createRpcClient", () => {
     }));
 
     const client = createRpcClient(contract, { invoke });
-    const result = await client.Ping();
+    const result = await Effect.runPromise(client.Ping());
 
     expect(result).toEqual({ ok: true });
     expect(invoke.invocations).toEqual([
@@ -119,7 +140,7 @@ describe("createRpcClient", () => {
     }));
 
     const client = createRpcClient(nullContract, { invoke });
-    const result = await client.AcceptNull(null);
+    const result = await Effect.runPromise(client.AcceptNull(null));
 
     expect(result).toEqual({ ok: true });
     expect(invoke.invocations).toEqual([
@@ -130,7 +151,7 @@ describe("createRpcClient", () => {
     ]);
   });
 
-  it("when a failure envelope contains a typed error, then the client throws that typed error", async () => {
+  it("when a failure envelope contains a typed error, then the client fails with that typed error", async () => {
     const invoke = createInvokeStub(async () => ({
       type: "failure",
       error: {
@@ -143,21 +164,16 @@ describe("createRpcClient", () => {
     }));
 
     const client = createRpcClient(contract, { invoke });
+    const exit = await Effect.runPromiseExit(client.MayFail());
+    const failure = expectFailure(exit);
 
-    let thrown: unknown;
-    try {
-      await client.MayFail();
-    } catch (error) {
-      thrown = error;
-    }
-
-    expect(thrown).toBeInstanceOf(AccessDeniedError);
-    if (thrown instanceof AccessDeniedError) {
-      expect(thrown.message).toBe("denied");
+    expect(failure).toBeInstanceOf(AccessDeniedError);
+    if (failure instanceof AccessDeniedError) {
+      expect(failure.message).toBe("denied");
     }
   });
 
-  it("when a NoError method receives a failure envelope, then the client throws a defect error", async () => {
+  it("when a NoError method receives a failure envelope, then the client fails with a defect", async () => {
     const invoke = createInvokeStub(async () => ({
       type: "failure",
       error: {
@@ -167,21 +183,14 @@ describe("createRpcClient", () => {
     }));
 
     const client = createRpcClient(contract, { invoke });
+    const exit = await Effect.runPromiseExit(client.Add({ a: 1, b: 2 }));
+    const defect = expectRpcDefect(exit);
 
-    let thrown: unknown;
-    try {
-      await client.Add({ a: 1, b: 2 });
-    } catch (error) {
-      thrown = error;
-    }
-
-    expect(thrown).toBeInstanceOf(RpcDefectError);
-    if (thrown instanceof RpcDefectError) {
-      expect(thrown.message).toContain("declares NoError");
-    }
+    expect(defect.code).toBe("noerror_contract_violation");
+    expect(defect.message).toContain("declares NoError");
   });
 
-  it("when a defect envelope is returned, then the client throws RpcDefectError", async () => {
+  it("when a defect envelope is returned, then the client fails with RpcDefectError", async () => {
     const invoke = createInvokeStub(async () => ({
       type: "defect",
       message: "boom",
@@ -189,19 +198,12 @@ describe("createRpcClient", () => {
     }));
 
     const client = createRpcClient(contract, { invoke });
+    const exit = await Effect.runPromiseExit(client.Add({ a: 1, b: 2 }));
+    const defect = expectRpcDefect(exit);
 
-    let thrown: unknown;
-    try {
-      await client.Add({ a: 1, b: 2 });
-    } catch (error) {
-      thrown = error;
-    }
-
-    expect(thrown).toBeInstanceOf(RpcDefectError);
-    if (thrown instanceof RpcDefectError) {
-      expect(thrown.message).toBe("boom");
-      expect(thrown.cause).toBe("boom");
-    }
+    expect(defect.code).toBe("remote_defect");
+    expect(defect.message).toBe("boom");
+    expect(defect.cause).toBe("boom");
   });
 
   it("when invoke returns a malformed response envelope, then the client reports a protocol error", async () => {
@@ -218,17 +220,10 @@ describe("createRpcClient", () => {
       },
     });
 
-    let thrown: unknown;
-    try {
-      await client.Add({ a: 1, b: 2 });
-    } catch (error) {
-      thrown = error;
-    }
-
-    expect(thrown).toBeInstanceOf(Error);
-    if (thrown instanceof Error) {
-      expect(thrown.message).toContain("valid envelope");
-    }
+    const exit = await Effect.runPromiseExit(client.Add({ a: 1, b: 2 }));
+    const defect = expectRpcDefect(exit);
+    expect(defect.code).toBe("invalid_response_envelope");
+    expect(defect.message).toContain("valid envelope");
 
     expect(protocolErrors.length).toBe(1);
     expect(protocolErrors[0]).toMatchObject({
@@ -251,7 +246,9 @@ describe("createRpcClient", () => {
       },
     });
 
-    await expect(client.Add({ a: 1, b: 2 })).rejects.toThrow(/valid envelope/);
+    const exit = await Effect.runPromiseExit(client.Add({ a: 1, b: 2 }));
+    const defect = expectRpcDefect(exit);
+    expect(defect.code).toBe("invalid_response_envelope");
     expect(protocolErrors).toHaveLength(1);
     expect(protocolErrors[0]).toMatchObject({
       method: "Add",
@@ -275,9 +272,9 @@ describe("createRpcClient", () => {
       },
     });
 
-    await expect(client.Add({ a: 1, b: 2 })).rejects.toThrow(
-      /success payload decoding failed/
-    );
+    const exit = await Effect.runPromiseExit(client.Add({ a: 1, b: 2 }));
+    const defect = expectRpcDefect(exit);
+    expect(defect.code).toBe("success_payload_decoding_failed");
     expect(decodeFailures).toHaveLength(1);
     expect(decodeFailures[0]).toMatchObject({
       scope: "rpc-response",
@@ -305,7 +302,9 @@ describe("createRpcClient", () => {
       },
     });
 
-    await expect(client.MayFail()).rejects.toThrow(/failure payload decoding failed/);
+    const exit = await Effect.runPromiseExit(client.MayFail());
+    const defect = expectRpcDefect(exit);
+    expect(defect.code).toBe("failure_payload_decoding_failed");
     expect(decodeFailures).toHaveLength(1);
     expect(decodeFailures[0]).toMatchObject({
       scope: "rpc-response",
@@ -329,7 +328,8 @@ describe("createRpcClient", () => {
       },
     });
 
-    await expect(client.Add({ a: 1, b: 2 })).rejects.toThrow();
+    const exit = await Effect.runPromiseExit(client.Add({ a: 1, b: 2 }));
+    expectRpcDefect(exit);
     expect(decodeFailures).toHaveLength(1);
     expect(decodeFailures[0]).toMatchObject({
       scope: "rpc-response",
@@ -353,7 +353,8 @@ describe("createRpcClient", () => {
       },
     });
 
-    await expect(client.Add({ a: 1, b: 2 })).rejects.toThrow(/valid envelope/);
+    const exit = await Effect.runPromiseExit(client.Add({ a: 1, b: 2 }));
+    expectRpcDefect(exit);
     expect(protocolErrors).toHaveLength(1);
     expect(protocolErrors[0]).toMatchObject({
       method: "Add",
@@ -373,10 +374,12 @@ describe("createRpcClient", () => {
       },
     });
 
-    await expect(client.Add({ a: 1, b: 2 })).rejects.toThrow(/valid envelope/);
+    const exit = await Effect.runPromiseExit(client.Add({ a: 1, b: 2 }));
+    const defect = expectRpcDefect(exit);
+    expect(defect.code).toBe("invalid_response_envelope");
   });
 
-  it("when invoke rejects, then the client reports a protocol error and throws RpcDefectError", async () => {
+  it("when invoke rejects, then the client reports a protocol error and fails with RpcDefectError", async () => {
     const protocolErrors: unknown[] = [];
     const invoke = createInvokeStub(async () => {
       throw new Error("ipc invoke failed");
@@ -391,19 +394,12 @@ describe("createRpcClient", () => {
       },
     });
 
-    let thrown: unknown;
-    try {
-      await client.Add({ a: 1, b: 2 });
-    } catch (error) {
-      thrown = error;
-    }
+    const exit = await Effect.runPromiseExit(client.Add({ a: 1, b: 2 }));
+    const defect = expectRpcDefect(exit);
 
-    expect(thrown).toBeInstanceOf(RpcDefectError);
-    if (thrown instanceof RpcDefectError) {
-      expect(thrown.message).toContain("invoke failed");
-      expect(thrown.cause).toBeInstanceOf(Error);
-    }
-
+    expect(defect.code).toBe("invoke_failed");
+    expect(defect.message).toContain("invoke failed");
+    expect(defect.cause).toBeInstanceOf(Error);
     expect(protocolErrors.length).toBe(1);
   });
 
@@ -427,7 +423,8 @@ describe("createRpcClient", () => {
       },
     });
 
-    await expect(client.Add({ a: 3, b: 5 })).resolves.toEqual({ sum: 8 });
+    const result = await Effect.runPromise(client.Add({ a: 3, b: 5 }));
+    expect(result).toEqual({ sum: 8 });
     expect(decodeFailures).toEqual([]);
     expect(protocolErrors).toEqual([]);
   });
@@ -451,8 +448,8 @@ describe("createRpcClient", () => {
     const acceptUndefined =
       client.AcceptUndefined as unknown as (
         value: undefined
-      ) => Promise<{ ok: boolean }>;
-    const result = await acceptUndefined(undefined);
+      ) => Effect.Effect<{ ok: boolean }, RpcDefectError>;
+    const result = await Effect.runPromise(acceptUndefined(undefined));
 
     expect(result).toEqual({ ok: true });
     expect(invoke.invocations).toEqual([
@@ -463,7 +460,7 @@ describe("createRpcClient", () => {
     ]);
   });
 
-  it("when input is omitted for a non-empty schema, then default decoding is attempted and the call is rejected", async () => {
+  it("when input is omitted for a non-empty schema, then request encoding fails in the defect channel", async () => {
     const AcceptNull = rpc("AcceptNull", S.Null, S.Struct({ ok: S.Boolean }));
     const nullContract = defineContract({
       methods: [AcceptNull] as const,
@@ -476,13 +473,19 @@ describe("createRpcClient", () => {
     }));
     const client = createRpcClient(nullContract, { invoke });
     const noArgCaller =
-      client.AcceptNull as unknown as () => Promise<{ ok: boolean }>;
+      client.AcceptNull as unknown as () => Effect.Effect<
+        { ok: boolean },
+        RpcDefectError
+      >;
 
-    expect(() => noArgCaller()).toThrow(/Expected null, actual \{\}/);
+    const exit = await Effect.runPromiseExit(noArgCaller());
+    const defect = expectRpcDefect(exit);
+    expect(defect.code).toBe("request_encoding_failed");
+    expect(defect.message).toContain("Expected null, actual {}");
     expect(invoke.invocations).toEqual([]);
   });
 
-  it("when decode mode is envelope and response is legacy Exit, then the client rejects it as invalid envelope", async () => {
+  it("when decode mode is envelope and response is legacy Exit, then the client fails it as invalid envelope", async () => {
     const encodeLegacyExit = S.encodeUnknownSync(exitSchemaFor(Add));
     const invoke = createInvokeStub(async () => {
       const exit = await Effect.runPromiseExit(Effect.succeed({ sum: 10 }));
@@ -494,7 +497,9 @@ describe("createRpcClient", () => {
       rpcDecodeMode: "envelope",
     });
 
-    await expect(client.Add({ a: 4, b: 6 })).rejects.toThrow(/valid envelope/);
+    const exit = await Effect.runPromiseExit(client.Add({ a: 4, b: 6 }));
+    const defect = expectRpcDefect(exit);
+    expect(defect.code).toBe("invalid_response_envelope");
   });
 
   it("when decode mode is dual and both formats are present, then the envelope format takes precedence", async () => {
@@ -516,9 +521,9 @@ describe("createRpcClient", () => {
       },
     });
 
-    await expect(client.Add({ a: 1, b: 2 })).rejects.toThrow(
-      /success payload decoding failed/
-    );
+    const exit = await Effect.runPromiseExit(client.Add({ a: 1, b: 2 }));
+    const defect = expectRpcDefect(exit);
+    expect(defect.code).toBe("success_payload_decoding_failed");
     expect(decodeFailures).toHaveLength(1);
   });
 
@@ -535,11 +540,11 @@ describe("createRpcClient", () => {
       rpcDecodeMode: "dual",
     });
 
-    const result = await client.Add({ a: 4, b: 6 });
+    const result = await Effect.runPromise(client.Add({ a: 4, b: 6 }));
     expect(result).toEqual({ sum: 10 });
   });
 
-  it("when decode mode is dual and legacy response is a typed failure, then the client throws the typed error", async () => {
+  it("when decode mode is dual and legacy response is a typed failure, then the client fails with the typed error", async () => {
     const encodeLegacyExit = S.encodeUnknownSync(exitSchemaFor(MayFail));
     const invoke = createInvokeStub(async () => {
       const exit = await Effect.runPromiseExit(
@@ -553,10 +558,15 @@ describe("createRpcClient", () => {
       rpcDecodeMode: "dual",
     });
 
-    await expect(client.MayFail()).rejects.toBeInstanceOf(AccessDeniedError);
+    const exit = await Effect.runPromiseExit(client.MayFail());
+    const failure = expectFailure(exit);
+    expect(failure).toBeInstanceOf(AccessDeniedError);
+    if (failure instanceof AccessDeniedError) {
+      expect(failure.message).toBe("denied-legacy");
+    }
   });
 
-  it("when decode mode is dual and legacy response is a defect, then the client throws RpcDefectError", async () => {
+  it("when decode mode is dual and legacy response is a defect, then the client fails with RpcDefectError", async () => {
     const encodeLegacyExit = S.encodeUnknownSync(exitSchemaFor(Add));
     const invoke = createInvokeStub(async () => {
       const exit = await Effect.runPromiseExit(Effect.dieMessage("legacy-die"));
@@ -568,10 +578,13 @@ describe("createRpcClient", () => {
       rpcDecodeMode: "dual",
     });
 
-    await expect(client.Add({ a: 1, b: 2 })).rejects.toBeInstanceOf(RpcDefectError);
+    const exit = await Effect.runPromiseExit(client.Add({ a: 1, b: 2 }));
+    const defect = expectRpcDefect(exit);
+    expect(defect.code).toBe("remote_defect");
+    expect(defect.message).toContain("legacy-die");
   });
 
-  it("when decode mode is dual and legacy response is an interrupt, then the client throws RpcDefectError", async () => {
+  it("when decode mode is dual and legacy response is an interrupt, then the client fails with RpcDefectError", async () => {
     const encodeLegacyExit = S.encodeUnknownSync(exitSchemaFor(Add));
     const invoke = createInvokeStub(async () => {
       const exit = await Effect.runPromiseExit(Effect.interrupt);
@@ -583,6 +596,9 @@ describe("createRpcClient", () => {
       rpcDecodeMode: "dual",
     });
 
-    await expect(client.Add({ a: 1, b: 2 })).rejects.toBeInstanceOf(RpcDefectError);
+    const exit = await Effect.runPromiseExit(client.Add({ a: 1, b: 2 }));
+    const defect = expectRpcDefect(exit);
+    expect(defect.code).toBe("remote_defect");
+    expect(defect.message).toContain("interrupted");
   });
 });
