@@ -1,6 +1,6 @@
 {
   "name": "electron-effect-rpc",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Typed IPC RPC for Electron, built on Effect and @effect/schema",
   "type": "module",
   "exports": {
