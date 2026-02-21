@@ -337,8 +337,8 @@ export function createEventPublisher<
       return;
     }
 
-    const window = options.getWindow();
-    if (!window || window.isDestroyed()) {
+    const windows = options.getWindows();
+    if (windows.length === 0) {
       dropped += 1;
 
       safelyCall(diagnostics?.onDroppedEvent, {
@@ -352,24 +352,41 @@ export function createEventPublisher<
       return;
     }
 
-    try {
-      window.webContents.send(`${channelPrefix.event}${item.event.name}`, encoded);
-    } catch (cause) {
-      dropped += 1;
+    const channel = `${channelPrefix.event}${item.event.name}`;
+    for (const window of windows) {
+      if (window.isDestroyed()) {
+        dropped += 1;
 
-      safelyCall(diagnostics?.onDispatchFailure, {
-        event: item.event.name,
-        payload: item.payload,
-        cause,
-      });
+        safelyCall(diagnostics?.onDroppedEvent, {
+          event: item.event.name,
+          payload: item.payload,
+          reason: "window_unavailable",
+          queued: queue.length,
+          dropped,
+        });
 
-      safelyCall(diagnostics?.onDroppedEvent, {
-        event: item.event.name,
-        payload: item.payload,
-        reason: "dispatch_failed",
-        queued: queue.length,
-        dropped,
-      });
+        continue;
+      }
+
+      try {
+        window.webContents.send(channel, encoded);
+      } catch (cause) {
+        dropped += 1;
+
+        safelyCall(diagnostics?.onDispatchFailure, {
+          event: item.event.name,
+          payload: item.payload,
+          cause,
+        });
+
+        safelyCall(diagnostics?.onDroppedEvent, {
+          event: item.event.name,
+          payload: item.payload,
+          reason: "dispatch_failed",
+          queued: queue.length,
+          dropped,
+        });
+      }
     }
   }
 

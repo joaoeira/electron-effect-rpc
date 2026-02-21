@@ -16,7 +16,7 @@ const endpoint = createRpcEndpoint(contract, ipcMain, implementations, {
 });
 
 const publisher = createEventPublisher(contract, {
-  getWindow: () => mainWindow,
+  getWindows: () => [mainWindow],
 });
 
 endpoint.start();
@@ -42,7 +42,7 @@ oldest queued event before enqueueing the new one.
 
 ```ts
 const publisher = createEventPublisher(contract, {
-  getWindow: () => mainWindow,
+  getWindows: () => [mainWindow],
   maxQueueSize: 500,
   diagnostics: {
     onDroppedEvent: (context) => {
@@ -61,9 +61,10 @@ tool without an application-level replay mechanism.
 
 ## Handle window availability honestly
 
-If `getWindow()` returns `null` or a destroyed window during dispatch, the event
-is dropped. This is a deliberate reliability tradeoff to avoid unbounded queues
-for unavailable renderers.
+If `getWindows()` returns an empty array during dispatch, the event is dropped
+once. If individual windows are destroyed, each destroyed window increments the
+drop counter independently. This is a deliberate reliability tradeoff to avoid
+unbounded queues for unavailable renderers.
 
 Use diagnostics to measure whether this is expected during startup transitions
 or an indication of real delivery problems.

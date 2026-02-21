@@ -113,7 +113,7 @@ describe("createIpcKit", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       runtime: Runtime.defaultRuntime,
-      getWindow: () => eventHarness.window,
+      getWindows: () => [eventHarness.window],
     });
     main.start();
 
@@ -154,7 +154,7 @@ describe("createIpcKit", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       runtime: Runtime.defaultRuntime,
-      getWindow: () => null,
+      getWindows: () => [],
     });
 
     expect(main.isRunning()).toBe(false);
@@ -194,7 +194,7 @@ describe("createIpcKit", () => {
       },
       handlers: {},
       runtime: Runtime.defaultRuntime,
-      getWindow: () => eventHarness.window,
+      getWindows: () => [eventHarness.window],
     });
     main.start();
 

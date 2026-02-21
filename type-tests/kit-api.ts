@@ -80,7 +80,7 @@ const mainOk = kit.main({
     Echo: ({ message }) => Effect.succeed({ echoed: message }),
   },
   runtime: Runtime.defaultRuntime,
-  getWindow: () => null,
+  getWindows: () => [],
 });
 
 const publishEffect: Fx.Effect<void, never> = mainOk.publish(Progress, {
@@ -95,7 +95,7 @@ kit.main({
     Ping: () => Effect.succeed({ ok: true }),
   },
   runtime: Runtime.defaultRuntime,
-  getWindow: () => null,
+  getWindows: () => [],
 });
 
 kit.main({
@@ -107,5 +107,5 @@ kit.main({
     Extra: () => Effect.succeed({ ok: true }),
   },
   runtime: Runtime.defaultRuntime,
-  getWindow: () => null,
+  getWindows: () => [],
 });

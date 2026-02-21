@@ -76,7 +76,7 @@ const mainRpc = ipc.main({
     GetAppVersion: () => Effect.succeed({ version: app.getVersion() }),
   },
   runtime: Runtime.defaultRuntime,
-  getWindow: () => mainWindow,
+  getWindows: () => [mainWindow],
 });
 
 mainRpc.start();
@@ -138,6 +138,21 @@ which includes a stable `code` discriminator:
 `legacy_decode_failed`, and `remote_defect`.
 
 ## Breaking Changes
+
+`getWindow` was renamed to `getWindows` and now returns an array, enabling
+multi-window event fan-out. Empty array replaces `null` for "no windows."
+
+Before:
+
+```ts
+getWindow: () => mainWindow,
+```
+
+After:
+
+```ts
+getWindows: () => [mainWindow],
+```
 
 Renderer RPC methods now return `Effect.Effect` instead of `Promise`, and
 `IpcMainHandle.emit` was removed in favor of `publish`.

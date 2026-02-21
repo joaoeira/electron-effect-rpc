@@ -191,7 +191,7 @@ export type RendererWindowLike = {
 
 export type EventPublisherOptions = {
   readonly channelPrefix?: ChannelPrefix;
-  readonly getWindow: () => RendererWindowLike | null;
+  readonly getWindows: () => ReadonlyArray<RendererWindowLike>;
   readonly maxQueueSize?: number;
   readonly diagnostics?: EventPublisherDiagnostics;
 };

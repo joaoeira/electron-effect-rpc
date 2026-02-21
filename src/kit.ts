@@ -52,7 +52,7 @@ type IpcMainOptions<
   readonly ipcMain: IpcMainLike;
   readonly handlers: Implementations<C, R>;
   readonly runtime: Runtime.Runtime<R>;
-  readonly getWindow: () => RendererWindowLike | null;
+  readonly getWindows: () => ReadonlyArray<RendererWindowLike>;
   readonly maxQueueSize?: number;
   readonly diagnostics?: {
     readonly rpc?: RpcEndpointDiagnostics;
@@ -130,7 +130,7 @@ export function createIpcKit<
     );
 
     const publisher = createEventPublisher(contract, {
-      getWindow: mainOptions.getWindow,
+      getWindows: mainOptions.getWindows,
       maxQueueSize: mainOptions.maxQueueSize,
       channelPrefix,
       diagnostics: mainOptions.diagnostics?.events,

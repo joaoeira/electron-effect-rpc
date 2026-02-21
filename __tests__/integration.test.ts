@@ -177,7 +177,7 @@ describe("integration", () => {
     endpoint.start();
 
     const publisher = createEventPublisher(contract, {
-      getWindow: () => eventBus.window,
+      getWindows: () => [eventBus.window],
       channelPrefix: prefix,
     });
     publisher.start();
@@ -215,7 +215,7 @@ describe("integration", () => {
 
     const eventBus = createEventBusHarness();
     const publisher = createEventPublisher(contract, {
-      getWindow: () => eventBus.window,
+      getWindows: () => [eventBus.window],
     });
     const subscriber = createEventSubscriber(contract, {
       subscribe: eventBus.subscribe,
@@ -252,7 +252,7 @@ describe("integration", () => {
       runtime: Runtime.defaultRuntime,
     });
     const publisher = createEventPublisher(contract, {
-      getWindow: () => eventBus.window,
+      getWindows: () => [eventBus.window],
     });
     const subscriber = createEventSubscriber(contract, {
       subscribe: eventBus.subscribe,

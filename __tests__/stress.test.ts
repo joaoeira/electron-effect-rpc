@@ -90,7 +90,7 @@ describe("stress", () => {
     });
 
     const publisher = createEventPublisher(contract, {
-      getWindow: () => null,
+      getWindows: () => [],
       maxQueueSize: 25,
     });
 
@@ -114,19 +114,19 @@ describe("stress", () => {
     let windowRead = 0;
     const sent: Array<{ channel: string; payload: unknown }> = [];
     const publisher = createEventPublisher(contract, {
-      getWindow: () => {
+      getWindows: () => {
         windowRead += 1;
         if (windowRead % 2 === 1) {
-          return null;
+          return [];
         }
-        return {
+        return [{
           isDestroyed: () => false,
           webContents: {
             send: (channel: string, payload: unknown) => {
               sent.push({ channel, payload });
             },
           },
-        };
+        }];
       },
     });
 

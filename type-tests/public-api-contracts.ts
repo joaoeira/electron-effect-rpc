@@ -140,7 +140,7 @@ subscriber.subscribe(Progress, (payload) => {
 
 // event_publisher_payload_inference_is_exact
 const publisher = createEventPublisher(contract, {
-  getWindow: () => null,
+  getWindows: () => [],
 });
 publisher.publish(Progress, { value: 1, label: "progress" });
 // @ts-expect-error Missing required "label" field.

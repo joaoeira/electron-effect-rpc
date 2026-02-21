@@ -241,7 +241,7 @@ describe("createEventPublisher", () => {
     };
 
     const publisher = createEventPublisher(contract, {
-      getWindow: () => windowStub,
+      getWindows: () => [windowStub],
     });
 
     await Effect.runPromise(publisher.publish(Progress, { value: 1 }));
@@ -259,7 +259,7 @@ describe("createEventPublisher", () => {
   it("when maxQueueSize is zero, then publisher creation throws", () => {
     expect(() =>
       createEventPublisher(contract, {
-        getWindow: () => null,
+        getWindows: () => [],
         maxQueueSize: 0,
       })
     ).toThrow(/positive finite number/);
@@ -268,7 +268,7 @@ describe("createEventPublisher", () => {
   it("when maxQueueSize is negative, then publisher creation throws", () => {
     expect(() =>
       createEventPublisher(contract, {
-        getWindow: () => null,
+        getWindows: () => [],
         maxQueueSize: -2,
       })
     ).toThrow(/positive finite number/);
@@ -277,14 +277,14 @@ describe("createEventPublisher", () => {
   it("when maxQueueSize is infinite or NaN, then publisher creation throws", () => {
     expect(() =>
       createEventPublisher(contract, {
-        getWindow: () => null,
+        getWindows: () => [],
         maxQueueSize: Number.POSITIVE_INFINITY,
       })
     ).toThrow(/positive finite number/);
 
     expect(() =>
       createEventPublisher(contract, {
-        getWindow: () => null,
+        getWindows: () => [],
         maxQueueSize: Number.NaN,
       })
     ).toThrow(/positive finite number/);
@@ -302,7 +302,7 @@ describe("createEventPublisher", () => {
     };
 
     const publisher = createEventPublisher(contract, {
-      getWindow: () => windowStub,
+      getWindows: () => [windowStub],
       channelPrefix: {
         rpc: "rpc-custom/",
         event: "evt-custom/",
@@ -331,7 +331,7 @@ describe("createEventPublisher", () => {
     };
 
     const publisher = createEventPublisher(contract, {
-      getWindow: () => windowStub,
+      getWindows: () => [windowStub],
     });
 
     publisher.start();
@@ -361,7 +361,7 @@ describe("createEventPublisher", () => {
     };
 
     const publisher = createEventPublisher(contract, {
-      getWindow: () => windowStub,
+      getWindows: () => [windowStub],
       maxQueueSize: 2,
       diagnostics: {
         onDroppedEvent: (context) => {
@@ -390,7 +390,7 @@ describe("createEventPublisher", () => {
     const dropped: unknown[] = [];
 
     const publisher = createEventPublisher(contract, {
-      getWindow: () => null,
+      getWindows: () => [],
       diagnostics: {
         onDroppedEvent: (context) => {
           dropped.push(context);
@@ -417,12 +417,12 @@ describe("createEventPublisher", () => {
   it("when target window is destroyed, then publisher records the event as dropped", async () => {
     const dropped: unknown[] = [];
     const publisher = createEventPublisher(contract, {
-      getWindow: () => ({
+      getWindows: () => [{
         isDestroyed: () => true,
         webContents: {
           send: () => {},
         },
-      }),
+      }],
       diagnostics: {
         onDroppedEvent: (context) => {
           dropped.push(context);
@@ -459,7 +459,7 @@ describe("createEventPublisher", () => {
     };
 
     const publisher = createEventPublisher(contract, {
-      getWindow: () => windowStub,
+      getWindows: () => [windowStub],
       diagnostics: {
         onDroppedEvent: (context) => {
           dropped.push(context);
@@ -501,7 +501,7 @@ describe("createEventPublisher", () => {
     };
 
     const publisher = createEventPublisher(contract, {
-      getWindow: () => windowStub,
+      getWindows: () => [windowStub],
     });
 
     publisher.start();
@@ -525,7 +525,7 @@ describe("createEventPublisher", () => {
     };
 
     const publisher = createEventPublisher(contract, {
-      getWindow: () => windowStub,
+      getWindows: () => [windowStub],
     });
 
     publisher.start();
@@ -552,7 +552,7 @@ describe("createEventPublisher", () => {
     };
 
     const publisher = createEventPublisher(contract, {
-      getWindow: () => windowStub,
+      getWindows: () => [windowStub],
     });
 
     publisher.start();
@@ -586,7 +586,7 @@ describe("createEventPublisher", () => {
     };
 
     const publisher = createEventPublisher(contract, {
-      getWindow: () => windowStub,
+      getWindows: () => [windowStub],
       diagnostics: {
         onDispatchFailure: (context) => {
           dispatchFailures.push(context);
@@ -632,7 +632,7 @@ describe("createEventPublisher", () => {
     };
 
     const publisher = createEventPublisher(contract, {
-      getWindow: () => windowStub,
+      getWindows: () => [windowStub],
       diagnostics: {
         onDispatchFailure: (context) => {
           dispatchFailures.push(context);
@@ -661,14 +661,14 @@ describe("createEventPublisher", () => {
     const dispatchFailures: Array<Record<string, unknown>> = [];
 
     const publisher = createEventPublisher(contract, {
-      getWindow: () => ({
+      getWindows: () => [{
         isDestroyed: () => false,
         webContents: {
           send: () => {
             throw new Error("send-failed");
           },
         },
-      }),
+      }],
       diagnostics: {
         onDispatchFailure: (context) => {
           dispatchFailures.push(context as unknown as Record<string, unknown>);
@@ -691,7 +691,7 @@ describe("createEventPublisher", () => {
     const dropped: Array<Record<string, unknown>> = [];
 
     const publisher = createEventPublisher(contract, {
-      getWindow: () => null,
+      getWindows: () => [],
       diagnostics: {
         onDroppedEvent: (context) => {
           dropped.push(context as unknown as Record<string, unknown>);
@@ -714,7 +714,7 @@ describe("createEventPublisher", () => {
 
   it("when event diagnostics callbacks throw, then publisher transport continues", async () => {
     const publisher = createEventPublisher(contract, {
-      getWindow: () => null,
+      getWindows: () => [],
       diagnostics: {
         onDroppedEvent: () => {
           throw new Error("diagnostics crashed");
@@ -746,7 +746,7 @@ describe("createEventPublisher", () => {
     };
 
     const publisher = createEventPublisher(contract, {
-      getWindow: () => windowStub,
+      getWindows: () => [windowStub],
       diagnostics: {
         onDecodeFailure: (context) => {
           decodeFailures.push(context);
@@ -778,7 +778,7 @@ describe("createEventPublisher", () => {
     let sendAttempt = 0;
 
     const publisher = createEventPublisher(contract, {
-      getWindow: () => ({
+      getWindows: () => [{
         isDestroyed: () => false,
         webContents: {
           send: () => {
@@ -788,7 +788,7 @@ describe("createEventPublisher", () => {
             }
           },
         },
-      }),
+      }],
       maxQueueSize: 2,
     });
 
@@ -813,7 +813,7 @@ describe("createEventPublisher", () => {
     };
 
     const publisher = createEventPublisher(contract, {
-      getWindow: () => windowStub,
+      getWindows: () => [windowStub],
     });
 
     publisher.start();
@@ -823,5 +823,212 @@ describe("createEventPublisher", () => {
     publisher.dispose();
 
     expect(() => publisher.start()).toThrow(/disposed/i);
+  });
+
+  it("when multiple windows are provided, then event is dispatched to all windows", async () => {
+    const sentA: Array<{ channel: string; payload: unknown }> = [];
+    const sentB: Array<{ channel: string; payload: unknown }> = [];
+    const windowA = {
+      isDestroyed: () => false,
+      webContents: {
+        send: (channel: string, payload: unknown) => {
+          sentA.push({ channel, payload });
+        },
+      },
+    };
+    const windowB = {
+      isDestroyed: () => false,
+      webContents: {
+        send: (channel: string, payload: unknown) => {
+          sentB.push({ channel, payload });
+        },
+      },
+    };
+
+    const publisher = createEventPublisher(contract, {
+      getWindows: () => [windowA, windowB],
+    });
+
+    publisher.start();
+    await Effect.runPromise(publisher.publish(Progress, { value: 42 }));
+    await waitFor(() => sentA.length === 1 && sentB.length === 1);
+
+    expect(sentA[0]).toEqual({ channel: "event/Progress", payload: { value: 42 } });
+    expect(sentB[0]).toEqual({ channel: "event/Progress", payload: { value: 42 } });
+    expect(publisher.stats().dropped).toBe(0);
+  });
+
+  it("when one window send throws during fan-out, then other windows still receive the event", async () => {
+    const sentB: Array<{ channel: string; payload: unknown }> = [];
+    const dropped: unknown[] = [];
+    const windowA = {
+      isDestroyed: () => false,
+      webContents: {
+        send: () => {
+          throw new Error("window-a-failed");
+        },
+      },
+    };
+    const windowB = {
+      isDestroyed: () => false,
+      webContents: {
+        send: (channel: string, payload: unknown) => {
+          sentB.push({ channel, payload });
+        },
+      },
+    };
+
+    const publisher = createEventPublisher(contract, {
+      getWindows: () => [windowA, windowB],
+      diagnostics: {
+        onDroppedEvent: (context) => {
+          dropped.push(context);
+        },
+      },
+    });
+
+    publisher.start();
+    await Effect.runPromise(publisher.publish(Progress, { value: 1 }));
+    await waitFor(() => sentB.length === 1);
+
+    expect(sentB[0]).toEqual({ channel: "event/Progress", payload: { value: 1 } });
+    expect(publisher.stats().dropped).toBe(1);
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]).toMatchObject({ reason: "dispatch_failed" });
+  });
+
+  it("when some windows are destroyed during fan-out, then destroyed windows are dropped and live windows receive", async () => {
+    const sentB: Array<{ channel: string; payload: unknown }> = [];
+    const dropped: unknown[] = [];
+    const windowDestroyed = {
+      isDestroyed: () => true,
+      webContents: {
+        send: () => {},
+      },
+    };
+    const windowLive = {
+      isDestroyed: () => false,
+      webContents: {
+        send: (channel: string, payload: unknown) => {
+          sentB.push({ channel, payload });
+        },
+      },
+    };
+
+    const publisher = createEventPublisher(contract, {
+      getWindows: () => [windowDestroyed, windowLive],
+      diagnostics: {
+        onDroppedEvent: (context) => {
+          dropped.push(context);
+        },
+      },
+    });
+
+    publisher.start();
+    await Effect.runPromise(publisher.publish(Progress, { value: 5 }));
+    await waitFor(() => sentB.length === 1);
+
+    expect(sentB[0]).toEqual({ channel: "event/Progress", payload: { value: 5 } });
+    expect(publisher.stats().dropped).toBe(1);
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]).toMatchObject({ reason: "window_unavailable" });
+  });
+
+  it("when all windows are destroyed, then dropped count equals number of windows", async () => {
+    const dropped: unknown[] = [];
+    const windowA = {
+      isDestroyed: () => true,
+      webContents: { send: () => {} },
+    };
+    const windowB = {
+      isDestroyed: () => true,
+      webContents: { send: () => {} },
+    };
+    const windowC = {
+      isDestroyed: () => true,
+      webContents: { send: () => {} },
+    };
+
+    const publisher = createEventPublisher(contract, {
+      getWindows: () => [windowA, windowB, windowC],
+      diagnostics: {
+        onDroppedEvent: (context) => {
+          dropped.push(context);
+        },
+      },
+    });
+
+    publisher.start();
+    await Effect.runPromise(publisher.publish(Progress, { value: 1 }));
+    await waitFor(() => publisher.stats().dropped === 3);
+
+    expect(publisher.stats().dropped).toBe(3);
+    expect(dropped).toHaveLength(3);
+  });
+
+  it("when getWindows returns empty array, then event is dropped once with window_unavailable", async () => {
+    const dropped: unknown[] = [];
+
+    const publisher = createEventPublisher(contract, {
+      getWindows: () => [],
+      diagnostics: {
+        onDroppedEvent: (context) => {
+          dropped.push(context);
+        },
+      },
+    });
+
+    publisher.start();
+    await Effect.runPromise(publisher.publish(Progress, { value: 1 }));
+    await waitFor(() => publisher.stats().dropped === 1);
+
+    expect(publisher.stats()).toEqual({ queued: 0, dropped: 1 });
+    expect(dropped).toEqual([
+      {
+        event: "Progress",
+        payload: { value: 1 },
+        reason: "window_unavailable",
+        queued: 0,
+        dropped: 1,
+      },
+    ]);
+  });
+
+  it("when encoding fails with multiple windows, then encode fails once and no windows are contacted", async () => {
+    const sent: unknown[] = [];
+    const dropped: unknown[] = [];
+    const decodeFailures: unknown[] = [];
+    const windowStub = {
+      isDestroyed: () => false,
+      webContents: {
+        send: (_channel: string, payload: unknown) => {
+          sent.push(payload);
+        },
+      },
+    };
+
+    const publisher = createEventPublisher(contract, {
+      getWindows: () => [windowStub, windowStub],
+      diagnostics: {
+        onDroppedEvent: (context) => {
+          dropped.push(context);
+        },
+        onDecodeFailure: (context) => {
+          decodeFailures.push(context);
+        },
+      },
+    });
+
+    publisher.start();
+    await Effect.runPromise(
+      publisher.publish(Progress, { value: "bad-number" } as never)
+    );
+    await waitFor(() => publisher.stats().dropped === 1);
+
+    expect(sent).toEqual([]);
+    expect(publisher.stats().dropped).toBe(1);
+    expect(decodeFailures).toHaveLength(1);
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]).toMatchObject({ reason: "encoding_failed" });
   });
 });

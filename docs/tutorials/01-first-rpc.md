@@ -66,7 +66,7 @@ const endpoint = createRpcEndpoint(
 );
 
 const publisher = createEventPublisher(contract, {
-  getWindow: () => mainWindow,
+  getWindows: () => [mainWindow],
 });
 
 endpoint.start();
