@@ -15,11 +15,7 @@ Put your contract in a module imported by both main and renderer code.
 import * as S from "@effect/schema/Schema";
 import { defineContract, event, rpc } from "electron-effect-rpc/contract";
 
-export const GetAppVersion = rpc(
-  "GetAppVersion",
-  S.Struct({}),
-  S.Struct({ version: S.String })
-);
+export const GetAppVersion = rpc("GetAppVersion", S.Struct({}), S.Struct({ version: S.String }));
 
 export const WorkUnitProgress = event(
   "WorkUnitProgress",
@@ -27,7 +23,7 @@ export const WorkUnitProgress = event(
     requestId: S.String,
     chunk: S.String,
     done: S.Boolean,
-  })
+  }),
 );
 
 export const contract = defineContract({
@@ -62,7 +58,7 @@ const endpoint = createRpcEndpoint(
   },
   {
     runtime: Runtime.defaultRuntime,
-  }
+  },
 );
 
 const publisher = createEventPublisher(contract, {
@@ -77,7 +73,7 @@ void Effect.runPromise(
     requestId: "req-1",
     chunk: "starting",
     done: false,
-  })
+  }),
 );
 ```
 

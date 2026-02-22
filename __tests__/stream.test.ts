@@ -4,7 +4,7 @@ import { Cause, Effect, Stream } from "effect";
 import * as Runtime from "effect/Runtime";
 import { defineContract, rpc, streamRpc } from "../src/contract.ts";
 import { createRpcEndpoint } from "../src/main.ts";
-import { parseStreamFrame, type StreamFrame } from "../src/protocol.ts";
+import { isRecord, parseStreamFrame, type StreamFrame } from "../src/protocol.ts";
 import { createStreamRpcClient, RpcDefectError } from "../src/renderer.ts";
 import { createIpcKit } from "../src/index.ts";
 import type { IpcMainLike, OnStreamFrame } from "../src/types.ts";
@@ -14,10 +14,7 @@ class StreamError extends S.TaggedError<StreamError>()("StreamError", {
 }) {}
 
 const createStreamHarness = (prefix = { rpc: "rpc/", event: "event/" }) => {
-  const handlers = new Map<
-    string,
-    (event: unknown, payload: unknown) => unknown
-  >();
+  const handlers = new Map<string, (event: unknown, payload: unknown) => unknown>();
 
   const ipcMain: IpcMainLike = {
     handle: (channel, listener) => {
@@ -90,6 +87,25 @@ const waitFor = async (predicate: () => boolean, timeoutMs = 2000) => {
   throw new Error("Timed out waiting for condition");
 };
 
+/** Safely parse the payload of a sent frame. Returns null if not a valid StreamFrame. */
+const asFrame = (f: { payload: unknown }): StreamFrame | null => parseStreamFrame(f.payload);
+
+/** Extract streamId from a frame payload using isRecord. */
+const extractStreamId = (payload: unknown): string => {
+  if (isRecord(payload) && typeof payload.streamId === "string") {
+    return payload.streamId;
+  }
+  throw new Error("Expected payload with streamId");
+};
+
+/** Safely narrow an unknown error value to RpcDefectError after instanceof check. */
+const asRpcDefect = (value: unknown): RpcDefectError => {
+  if (!(value instanceof RpcDefectError)) {
+    throw new Error(`Expected RpcDefectError, got: ${typeof value}`);
+  }
+  return value;
+};
+
 const StreamAdd = streamRpc(
   "StreamAdd",
   S.Struct({ count: S.Number }),
@@ -158,9 +174,7 @@ describe("streamRpc contract", () => {
       defineContract({
         methods: [] as const,
         events: [] as const,
-        streamMethods: [
-          streamRpc("stream-cancel", S.Struct({}), S.Struct({})),
-        ] as const,
+        streamMethods: [streamRpc("stream-cancel", S.Struct({}), S.Struct({}))] as const,
       }),
     ).toThrow(/reserved for internal stream transport/);
 
@@ -168,9 +182,7 @@ describe("streamRpc contract", () => {
       defineContract({
         methods: [] as const,
         events: [] as const,
-        streamMethods: [
-          streamRpc("stream/foo", S.Struct({}), S.Struct({})),
-        ] as const,
+        streamMethods: [streamRpc("stream/foo", S.Struct({}), S.Struct({}))] as const,
       }),
     ).toThrow(/must not start with "stream\/"/);
   });
@@ -250,9 +262,7 @@ describe("parseStreamFrame", () => {
     expect(parseStreamFrame({})).toBeNull();
     expect(parseStreamFrame({ type: "data" })).toBeNull(); // missing streamId
     expect(parseStreamFrame({ type: "data", streamId: "a" })).toBeNull(); // missing payload
-    expect(
-      parseStreamFrame({ type: "error", streamId: "a", error: {} }),
-    ).toBeNull(); // missing tag
+    expect(parseStreamFrame({ type: "error", streamId: "a", error: {} })).toBeNull(); // missing tag
   });
 });
 
@@ -270,9 +280,7 @@ describe("createRpcEndpoint with streamHandlers", () => {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
           StreamAdd: ({ count }) =>
-            Stream.fromIterable(
-              Array.from({ length: count }, (_, i) => ({ value: i })),
-            ),
+            Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -299,9 +307,7 @@ describe("createRpcEndpoint with streamHandlers", () => {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
           StreamAdd: ({ count }) =>
-            Stream.fromIterable(
-              Array.from({ length: count }, (_, i) => ({ value: i })),
-            ),
+            Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -325,9 +331,7 @@ describe("createRpcEndpoint with streamHandlers", () => {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
           StreamAdd: ({ count }) =>
-            Stream.fromIterable(
-              Array.from({ length: count }, (_, i) => ({ value: i })),
-            ),
+            Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -348,8 +352,8 @@ describe("createRpcEndpoint with streamHandlers", () => {
     // Wait for frames to be sent
     await waitFor(() => {
       const endFrames = harness.sentFrames.filter((f) => {
-        const payload = f.payload as StreamFrame;
-        return payload.type === "end" && payload.streamId === "test-stream-1";
+        const frame = asFrame(f);
+        return frame?.type === "end" && frame.streamId === "test-stream-1";
       });
       return endFrames.length > 0;
     });
@@ -357,10 +361,13 @@ describe("createRpcEndpoint with streamHandlers", () => {
     // Verify data frames
     const dataFrames = harness.sentFrames
       .filter((f) => {
-        const p = f.payload as StreamFrame;
-        return p.type === "data" && p.streamId === "test-stream-1";
+        const frame = asFrame(f);
+        return frame?.type === "data" && frame.streamId === "test-stream-1";
       })
-      .map((f) => (f.payload as { payload: unknown }).payload);
+      .map((f) => {
+        const rec = isRecord(f.payload) ? f.payload : {};
+        return rec.payload;
+      });
 
     expect(dataFrames).toEqual([{ value: 0 }, { value: 1 }, { value: 2 }]);
   });
@@ -378,9 +385,7 @@ describe("createRpcEndpoint with streamHandlers", () => {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
           StreamAdd: ({ count }) =>
-            Stream.fromIterable(
-              Array.from({ length: count }, (_, i) => ({ value: i })),
-            ),
+            Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -395,25 +400,25 @@ describe("createRpcEndpoint with streamHandlers", () => {
 
     await waitFor(() => {
       return harness.sentFrames.some((f) => {
-        const p = f.payload as StreamFrame;
+        const frame = asFrame(f);
         return (
-          (p.type === "error" || p.type === "defect") &&
-          p.streamId === "fail-stream-1"
+          (frame?.type === "error" || frame?.type === "defect") &&
+          frame.streamId === "fail-stream-1"
         );
       });
     });
 
     const errorFrame = harness.sentFrames.find((f) => {
-      const p = f.payload as StreamFrame;
-      return p.type === "error" && p.streamId === "fail-stream-1";
+      const frame = asFrame(f);
+      return frame?.type === "error" && frame.streamId === "fail-stream-1";
     });
 
     expect(errorFrame).toBeDefined();
-    const payload = errorFrame!.payload as {
-      type: "error";
-      error: { tag: string; data: unknown };
-    };
-    expect(payload.error.tag).toBe("StreamError");
+    const frame = asFrame(errorFrame!);
+    expect(frame).not.toBeNull();
+    if (frame?.type === "error") {
+      expect(frame.error.tag).toBe("StreamError");
+    }
   });
 
   it("when stream request has invalid streamId, then defect envelope is returned", async () => {
@@ -429,9 +434,7 @@ describe("createRpcEndpoint with streamHandlers", () => {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
           StreamAdd: ({ count }) =>
-            Stream.fromIterable(
-              Array.from({ length: count }, (_, i) => ({ value: i })),
-            ),
+            Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -460,9 +463,9 @@ describe("createRpcEndpoint with streamHandlers", () => {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
           StreamAdd: () =>
-            Stream.fromIterable(
-              Array.from({ length: 100000 }, (_, i) => ({ value: i })),
-            ).pipe(Stream.tap(() => Effect.yieldNow())),
+            Stream.fromIterable(Array.from({ length: 100000 }, (_, i) => ({ value: i }))).pipe(
+              Stream.tap(() => Effect.yieldNow()),
+            ),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -486,8 +489,8 @@ describe("createRpcEndpoint with streamHandlers", () => {
       streamId: "dup-id",
     });
     expect(second).toMatchObject({ type: "defect" });
-    if (typeof second === "object" && second !== null && "message" in second) {
-      expect((second as { message: string }).message).toContain("Duplicate");
+    if (isRecord(second) && typeof second.message === "string") {
+      expect(second.message).toContain("Duplicate");
     }
 
     endpoint.dispose();
@@ -506,9 +509,9 @@ describe("createRpcEndpoint with streamHandlers", () => {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
           StreamAdd: () =>
-            Stream.fromIterable(
-              Array.from({ length: 100000 }, (_, i) => ({ value: i })),
-            ).pipe(Stream.tap(() => Effect.yieldNow())),
+            Stream.fromIterable(Array.from({ length: 100000 }, (_, i) => ({ value: i }))).pipe(
+              Stream.tap(() => Effect.yieldNow()),
+            ),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -549,9 +552,7 @@ describe("createRpcEndpoint with streamHandlers", () => {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
           StreamAdd: ({ count }) =>
-            Stream.fromIterable(
-              Array.from({ length: count }, (_, i) => ({ value: i })),
-            ),
+            Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -579,9 +580,7 @@ describe("createRpcEndpoint with streamHandlers", () => {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
           StreamAdd: ({ count }) =>
-            Stream.fromIterable(
-              Array.from({ length: count }, (_, i) => ({ value: i })),
-            ),
+            Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -615,9 +614,7 @@ describe("stream rpc end-to-end", () => {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
           StreamAdd: ({ count }) =>
-            Stream.fromIterable(
-              Array.from({ length: count }, (_, i) => ({ value: i })),
-            ),
+            Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -642,13 +639,7 @@ describe("stream rpc end-to-end", () => {
       ),
     );
 
-    expect(chunks).toEqual([
-      { value: 0 },
-      { value: 1 },
-      { value: 2 },
-      { value: 3 },
-      { value: 4 },
-    ]);
+    expect(chunks).toEqual([{ value: 0 }, { value: 1 }, { value: 2 }, { value: 3 }, { value: 4 }]);
 
     streamHandle.dispose();
     endpoint.stop();
@@ -667,9 +658,7 @@ describe("stream rpc end-to-end", () => {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
           StreamAdd: ({ count }) =>
-            Stream.fromIterable(
-              Array.from({ length: count }, (_, i) => ({ value: i })),
-            ),
+            Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -705,9 +694,7 @@ describe("stream rpc end-to-end", () => {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
           StreamAdd: ({ count }) =>
-            Stream.fromIterable(
-              Array.from({ length: count }, (_, i) => ({ value: i })),
-            ),
+            Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -752,9 +739,7 @@ describe("stream rpc end-to-end", () => {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
           StreamAdd: ({ count }) =>
-            Stream.fromIterable(
-              Array.from({ length: count }, (_, i) => ({ value: i })),
-            ),
+            Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -836,9 +821,7 @@ describe("stream rpc end-to-end", () => {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
           StreamAdd: ({ count }) =>
-            Stream.fromIterable(
-              Array.from({ length: count }, (_, i) => ({ value: i })),
-            ),
+            Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -872,9 +855,7 @@ describe("stream rpc end-to-end", () => {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
           StreamAdd: ({ count }) =>
-            Stream.fromIterable(
-              Array.from({ length: count }, (_, i) => ({ value: i })),
-            ),
+            Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -927,9 +908,9 @@ describe("main-side stream edge cases", () => {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
           StreamAdd: ({ count }) =>
-            Stream.fromIterable(
-              Array.from({ length: count }, (_, i) => ({ value: i })),
-            ).pipe(Stream.tap(() => Effect.sleep("5 millis"))),
+            Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))).pipe(
+              Stream.tap(() => Effect.sleep("5 millis")),
+            ),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -945,8 +926,8 @@ describe("main-side stream edge cases", () => {
     // Wait for at least one data frame
     await waitFor(() =>
       harness.sentFrames.some((f) => {
-        const p = f.payload as StreamFrame;
-        return p.type === "data" && p.streamId === "destroy-me";
+        const frame = asFrame(f);
+        return frame?.type === "data" && frame.streamId === "destroy-me";
       }),
     );
 
@@ -964,8 +945,8 @@ describe("main-side stream edge cases", () => {
 
     // No end frame should be sent either
     const endFrames = harness.sentFrames.filter((f) => {
-      const p = f.payload as StreamFrame;
-      return p.type === "end" && p.streamId === "destroy-me";
+      const frame = asFrame(f);
+      return frame?.type === "end" && frame.streamId === "destroy-me";
     });
     expect(endFrames.length).toBe(0);
 
@@ -985,9 +966,9 @@ describe("main-side stream edge cases", () => {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
           StreamAdd: () =>
-            Stream.fromIterable(
-              Array.from({ length: 100000 }, (_, i) => ({ value: i })),
-            ).pipe(Stream.tap(() => Effect.yieldNow())),
+            Stream.fromIterable(Array.from({ length: 100000 }, (_, i) => ({ value: i }))).pipe(
+              Stream.tap(() => Effect.yieldNow()),
+            ),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -1034,9 +1015,9 @@ describe("main-side stream edge cases", () => {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
           StreamAdd: () =>
-            Stream.fromIterable(
-              Array.from({ length: 100000 }, (_, i) => ({ value: i })),
-            ).pipe(Stream.tap(() => Effect.yieldNow())),
+            Stream.fromIterable(Array.from({ length: 100000 }, (_, i) => ({ value: i }))).pipe(
+              Stream.tap(() => Effect.yieldNow()),
+            ),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -1070,8 +1051,8 @@ describe("main-side stream edge cases", () => {
       {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
-          StreamAdd: () =>
-            Stream.fromEffect(Effect.die("handler crashed")) as any,
+          // @ts-expect-error intentionally wrong stream return type to test defect handling
+          StreamAdd: () => Stream.fromEffect(Effect.die("handler crashed")),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -1086,19 +1067,22 @@ describe("main-side stream edge cases", () => {
 
     await waitFor(() =>
       harness.sentFrames.some((f) => {
-        const p = f.payload as StreamFrame;
-        return p.type === "defect" && p.streamId === "die-test";
+        const frame = asFrame(f);
+        return frame?.type === "defect" && frame.streamId === "die-test";
       }),
     );
 
     const defectFrame = harness.sentFrames.find((f) => {
-      const p = f.payload as StreamFrame;
-      return p.type === "defect" && p.streamId === "die-test";
+      const frame = asFrame(f);
+      return frame?.type === "defect" && frame.streamId === "die-test";
     });
 
     expect(defectFrame).toBeDefined();
-    const payload = defectFrame!.payload as { type: "defect"; message: string };
-    expect(payload.message).toContain("handler crashed");
+    const parsed = asFrame(defectFrame!);
+    expect(parsed).not.toBeNull();
+    if (parsed?.type === "defect") {
+      expect(parsed.message).toContain("handler crashed");
+    }
 
     endpoint.dispose();
   });
@@ -1116,11 +1100,9 @@ describe("main-side stream edge cases", () => {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
           StreamAdd: ({ count }) =>
-            Stream.fromIterable(
-              Array.from({ length: count }, (_, i) => ({ value: i })),
-            ),
-          // Fail with a value that doesn't match the StreamError schema
-          StreamFail: () => Stream.fail(42 as any),
+            Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
+          // @ts-expect-error Fail with a value that doesn't match the StreamError schema
+          StreamFail: () => Stream.fail(42),
         },
       },
     );
@@ -1134,18 +1116,17 @@ describe("main-side stream edge cases", () => {
 
     await waitFor(() =>
       harness.sentFrames.some((f) => {
-        const p = f.payload as StreamFrame;
+        const frame = asFrame(f);
         return (
-          (p.type === "defect" || p.type === "error") &&
-          p.streamId === "encode-fail"
+          (frame?.type === "defect" || frame?.type === "error") && frame.streamId === "encode-fail"
         );
       }),
     );
 
     // Should be a defect (not error) because encoding the error value failed
     const defectFrame = harness.sentFrames.find((f) => {
-      const p = f.payload as StreamFrame;
-      return p.type === "defect" && p.streamId === "encode-fail";
+      const frame = asFrame(f);
+      return frame?.type === "defect" && frame.streamId === "encode-fail";
     });
     expect(defectFrame).toBeDefined();
 
@@ -1165,9 +1146,7 @@ describe("main-side stream edge cases", () => {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
           StreamAdd: () =>
-            Stream.repeatEffect(
-              Effect.sleep("10 millis").pipe(Effect.as({ value: 1 })),
-            ),
+            Stream.repeatEffect(Effect.sleep("10 millis").pipe(Effect.as({ value: 1 }))),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -1183,8 +1162,8 @@ describe("main-side stream edge cases", () => {
     // Wait for stream to start producing
     await waitFor(() =>
       harness.sentFrames.some((f) => {
-        const p = f.payload as StreamFrame;
-        return p.type === "data" && p.streamId === "cancel-frame-test";
+        const frame = asFrame(f);
+        return frame?.type === "data" && frame.streamId === "cancel-frame-test";
       }),
     );
 
@@ -1195,10 +1174,10 @@ describe("main-side stream edge cases", () => {
 
     // Cancellation should NOT produce error or defect frames
     const errorDefectFrames = harness.sentFrames.filter((f) => {
-      const p = f.payload as StreamFrame;
+      const frame = asFrame(f);
       return (
-        (p.type === "error" || p.type === "defect") &&
-        p.streamId === "cancel-frame-test"
+        (frame?.type === "error" || frame?.type === "defect") &&
+        frame.streamId === "cancel-frame-test"
       );
     });
     expect(errorDefectFrames.length).toBe(0);
@@ -1225,8 +1204,8 @@ describe("main-side stream edge cases", () => {
       {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
-          // StreamAdd is NoError, but we force a failure
-          StreamAdd: () => Stream.fail(new Error("unexpected failure") as any),
+          // @ts-expect-error StreamAdd is NoError, but we force a failure
+          StreamAdd: () => Stream.fail(new Error("unexpected failure")),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -1241,18 +1220,21 @@ describe("main-side stream edge cases", () => {
 
     await waitFor(() =>
       harness.sentFrames.some((f) => {
-        const p = f.payload as StreamFrame;
-        return p.type === "defect" && p.streamId === "noerror-fail";
+        const frame = asFrame(f);
+        return frame?.type === "defect" && frame.streamId === "noerror-fail";
       }),
     );
 
     const defectFrame = harness.sentFrames.find((f) => {
-      const p = f.payload as StreamFrame;
-      return p.type === "defect" && p.streamId === "noerror-fail";
+      const frame = asFrame(f);
+      return frame?.type === "defect" && frame.streamId === "noerror-fail";
     });
     expect(defectFrame).toBeDefined();
-    const payload = defectFrame!.payload as { type: "defect"; message: string };
-    expect(payload.message).toContain("unexpected failure");
+    const parsed = asFrame(defectFrame!);
+    expect(parsed).not.toBeNull();
+    if (parsed?.type === "defect") {
+      expect(parsed.message).toContain("unexpected failure");
+    }
 
     endpoint.dispose();
   });
@@ -1276,9 +1258,7 @@ describe("main-side stream edge cases", () => {
         },
         streamHandlers: {
           StreamAdd: ({ count }) =>
-            Stream.fromIterable(
-              Array.from({ length: count }, (_, i) => ({ value: i })),
-            ),
+            Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -1316,9 +1296,9 @@ describe("renderer-side stream edge cases", () => {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
           StreamAdd: ({ count }) =>
-            Stream.fromIterable(
-              Array.from({ length: count }, (_, i) => ({ value: i })),
-            ).pipe(Stream.tap(() => Effect.sleep("20 millis"))),
+            Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))).pipe(
+              Stream.tap(() => Effect.sleep("20 millis")),
+            ),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -1338,16 +1318,16 @@ describe("renderer-side stream edge cases", () => {
     // Wait for at least one data frame to extract the streamId
     await waitFor(() =>
       harness.sentFrames.some((f) => {
-        const p = f.payload as StreamFrame;
-        return p.type === "data";
+        const frame = asFrame(f);
+        return frame?.type === "data";
       }),
     );
 
     const dataFrame = harness.sentFrames.find((f) => {
-      const p = f.payload as StreamFrame;
-      return p.type === "data";
+      const frame = asFrame(f);
+      return frame?.type === "data";
     });
-    const streamId = (dataFrame!.payload as { streamId: string }).streamId;
+    const streamId = extractStreamId(dataFrame!.payload);
 
     // Inject a malformed frame with valid streamId but invalid type
     for (const listener of harness.frameListeners) {
@@ -1361,10 +1341,8 @@ describe("renderer-side stream edge cases", () => {
       const error = Cause.failureOption(exit.cause);
       expect(error._tag).toBe("Some");
       if (error._tag === "Some") {
-        expect(error.value).toBeInstanceOf(RpcDefectError);
-        expect((error.value as RpcDefectError).message).toContain(
-          "Malformed stream frame received",
-        );
+        const defect = asRpcDefect(error.value);
+        expect(defect.message).toContain("Malformed stream frame received");
       }
     }
 
@@ -1417,10 +1395,8 @@ describe("renderer-side stream edge cases", () => {
       const error = Cause.failureOption(exit.cause);
       expect(error._tag).toBe("Some");
       if (error._tag === "Some") {
-        expect(error.value).toBeInstanceOf(RpcDefectError);
-        expect((error.value as RpcDefectError).message).toContain(
-          "Stream client disposed",
-        );
+        const defect = asRpcDefect(error.value);
+        expect(defect.message).toContain("Stream client disposed");
       }
     }
 
@@ -1452,10 +1428,8 @@ describe("renderer-side stream edge cases", () => {
       const error = Cause.failureOption(exit.cause);
       expect(error._tag).toBe("Some");
       if (error._tag === "Some") {
-        expect(error.value).toBeInstanceOf(RpcDefectError);
-        expect((error.value as RpcDefectError).code).toBe(
-          "stream_handshake_invalid",
-        );
+        const defect = asRpcDefect(error.value);
+        expect(defect.code).toBe("stream_handshake_invalid");
       }
     }
 
@@ -1475,9 +1449,9 @@ describe("renderer-side stream edge cases", () => {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
           StreamAdd: ({ count }) =>
-            Stream.fromIterable(
-              Array.from({ length: count }, (_, i) => ({ value: i })),
-            ).pipe(Stream.tap(() => Effect.sleep("20 millis"))),
+            Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))).pipe(
+              Stream.tap(() => Effect.sleep("20 millis")),
+            ),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -1497,16 +1471,16 @@ describe("renderer-side stream edge cases", () => {
     // Wait for at least one data frame to get streamId
     await waitFor(() =>
       harness.sentFrames.some((f) => {
-        const p = f.payload as StreamFrame;
-        return p.type === "data";
+        const frame = asFrame(f);
+        return frame?.type === "data";
       }),
     );
 
     const dataFrame = harness.sentFrames.find((f) => {
-      const p = f.payload as StreamFrame;
-      return p.type === "data";
+      const frame = asFrame(f);
+      return frame?.type === "data";
     });
-    const streamId = (dataFrame!.payload as { streamId: string }).streamId;
+    const streamId = extractStreamId(dataFrame!.payload);
 
     // Inject an error frame for a NoError stream method
     for (const listener of harness.frameListeners) {
@@ -1524,10 +1498,8 @@ describe("renderer-side stream edge cases", () => {
       const error = Cause.failureOption(exit.cause);
       expect(error._tag).toBe("Some");
       if (error._tag === "Some") {
-        expect(error.value).toBeInstanceOf(RpcDefectError);
-        expect((error.value as RpcDefectError).code).toBe(
-          "stream_error_decode_failed",
-        );
+        const defect = asRpcDefect(error.value);
+        expect(defect.code).toBe("stream_error_decode_failed");
       }
     }
 
@@ -1574,8 +1546,7 @@ describe("stream rpc e2e edge cases", () => {
       if (method.startsWith("stream/")) {
         return {
           type: "defect",
-          message:
-            "Stream StreamAdd request decode failed: count must be a number",
+          message: "Stream StreamAdd request decode failed: count must be a number",
           cause: "bad input",
         };
       }
@@ -1597,11 +1568,9 @@ describe("stream rpc e2e edge cases", () => {
       const error = Cause.failureOption(exit.cause);
       expect(error._tag).toBe("Some");
       if (error._tag === "Some") {
-        expect(error.value).toBeInstanceOf(RpcDefectError);
-        expect((error.value as RpcDefectError).code).toBe("remote_defect");
-        expect((error.value as RpcDefectError).message).toContain(
-          "decode failed",
-        );
+        const defect = asRpcDefect(error.value);
+        expect(defect.code).toBe("remote_defect");
+        expect(defect.message).toContain("decode failed");
       }
     }
 
@@ -1621,9 +1590,7 @@ describe("stream rpc e2e edge cases", () => {
         runtime: Runtime.defaultRuntime,
         streamHandlers: {
           StreamAdd: () =>
-            Stream.repeatEffect(
-              Effect.sleep("10 millis").pipe(Effect.as({ value: 1 })),
-            ),
+            Stream.repeatEffect(Effect.sleep("10 millis").pipe(Effect.as({ value: 1 }))),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -1656,10 +1623,10 @@ describe("stream rpc e2e edge cases", () => {
 
     // Find the streamId from data frames
     const dataFrame = harness.sentFrames.find((f) => {
-      const p = f.payload as StreamFrame;
-      return p.type === "data";
+      const frame = asFrame(f);
+      return frame?.type === "data";
     });
-    const streamId = (dataFrame!.payload as { streamId: string }).streamId;
+    const streamId = extractStreamId(dataFrame!.payload);
 
     // Verify the main fiber was cleaned up (entry removed from activeStreams)
     // If cancel was NOT sent, the fiber would still be running
@@ -1683,8 +1650,6 @@ describe("kit stream wiring", () => {
       subscribe: () => () => {},
     };
 
-    expect(() => kit.renderer(bridgeWithoutStream)).toThrow(
-      /bridge.onStreamFrame is missing/,
-    );
+    expect(() => kit.renderer(bridgeWithoutStream)).toThrow(/bridge.onStreamFrame is missing/);
   });
 });

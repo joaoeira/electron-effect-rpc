@@ -6,11 +6,7 @@ import { createIpcKit, defineContract, event, rpc } from "../src/index.ts";
 import type { IpcMainLike, RpcDefectError } from "../src/types.ts";
 
 const Ping = rpc("Ping", S.Struct({}), S.Struct({ ok: S.Boolean }));
-const Echo = rpc(
-  "Echo",
-  S.Struct({ message: S.String }),
-  S.Struct({ echoed: S.String })
-);
+const Echo = rpc("Echo", S.Struct({ message: S.String }), S.Struct({ echoed: S.String }));
 const Progress = event("Progress", S.Struct({ value: S.Number }));
 
 const contract = defineContract({

@@ -46,22 +46,23 @@ const createRpcHarness = () => {
 
 describe("stress", () => {
   it("when rpc call volume is high, then responses stay isolated with no state corruption", async () => {
-    const Add = rpc(
-      "Add",
-      S.Struct({ a: S.Number, b: S.Number }),
-      S.Struct({ sum: S.Number })
-    );
+    const Add = rpc("Add", S.Struct({ a: S.Number, b: S.Number }), S.Struct({ sum: S.Number }));
     const contract = defineContract({
       methods: [Add] as const,
       events: [] as const,
     });
     const { ipcMain, invoke } = createRpcHarness();
 
-    const endpoint = createRpcEndpoint(contract, ipcMain, {
-      Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
-    }, {
-      runtime: Runtime.defaultRuntime,
-    });
+    const endpoint = createRpcEndpoint(
+      contract,
+      ipcMain,
+      {
+        Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+      },
+    );
     endpoint.start();
 
     const client = createRpcClient(contract, { invoke });
@@ -74,7 +75,7 @@ describe("stress", () => {
           index: i,
           sum: result.sum,
         };
-      })
+      }),
     );
 
     for (const result of results) {
@@ -119,14 +120,16 @@ describe("stress", () => {
         if (windowRead % 2 === 1) {
           return [];
         }
-        return [{
-          isDestroyed: () => false,
-          webContents: {
-            send: (channel: string, payload: unknown) => {
-              sent.push({ channel, payload });
+        return [
+          {
+            isDestroyed: () => false,
+            webContents: {
+              send: (channel: string, payload: unknown) => {
+                sent.push({ channel, payload });
+              },
             },
           },
-        }];
+        ];
       },
     });
 

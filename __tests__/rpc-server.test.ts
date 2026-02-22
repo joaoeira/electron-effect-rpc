@@ -4,7 +4,7 @@ import { Context, Effect } from "effect";
 import * as Runtime from "effect/Runtime";
 import { defineContract, rpc } from "../src/contract.ts";
 import { createRpcEndpoint } from "../src/main.ts";
-import { parseRpcResponseEnvelope } from "../src/protocol.ts";
+import { isRecord, parseRpcResponseEnvelope } from "../src/protocol.ts";
 import type { IpcMainLike } from "../src/types.ts";
 
 class DomainError extends S.TaggedError<DomainError>()("DomainError", {
@@ -28,7 +28,7 @@ const createIpcMainStub = () => {
 
 const requireHandler = (
   handlers: Map<string, (event: unknown, payload: unknown) => unknown>,
-  channel: string
+  channel: string,
 ) => {
   const handler = handlers.get(channel);
   if (!handler) {
@@ -39,18 +39,9 @@ const requireHandler = (
 };
 
 describe("createRpcEndpoint", () => {
-  const Add = rpc(
-    "Add",
-    S.Struct({ a: S.Number, b: S.Number }),
-    S.Struct({ sum: S.Number })
-  );
+  const Add = rpc("Add", S.Struct({ a: S.Number, b: S.Number }), S.Struct({ sum: S.Number }));
 
-  const Fail = rpc(
-    "Fail",
-    S.Struct({}),
-    S.Struct({ ok: S.Boolean }),
-    DomainError
-  );
+  const Fail = rpc("Fail", S.Struct({}), S.Struct({ ok: S.Boolean }), DomainError);
 
   const contract = defineContract({
     methods: [Add, Fail] as const,
@@ -60,12 +51,17 @@ describe("createRpcEndpoint", () => {
   it("when an endpoint starts and stops normally, then handlers are registered and removed", () => {
     const { ipcMain, handlers } = createIpcMainStub();
 
-    const endpoint = createRpcEndpoint(contract, ipcMain, {
-      Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
-      Fail: () => Effect.fail(new DomainError({ message: "denied" })),
-    }, {
-      runtime: Runtime.defaultRuntime,
-    });
+    const endpoint = createRpcEndpoint(
+      contract,
+      ipcMain,
+      {
+        Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
+        Fail: () => Effect.fail(new DomainError({ message: "denied" })),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+      },
+    );
 
     expect(handlers.size).toBe(0);
     expect(endpoint.isRunning()).toBe(false);
@@ -87,13 +83,14 @@ describe("createRpcEndpoint", () => {
       createRpcEndpoint(
         contract,
         ipcMain,
+        // @ts-expect-error intentionally partial implementation to test error path
         {
           Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
-        } as never,
+        },
         {
           runtime: Runtime.defaultRuntime,
-        }
-      )
+        },
+      ),
     ).toThrow(/Missing implementation for RPC method: Fail/);
   });
 
@@ -107,28 +104,34 @@ describe("createRpcEndpoint", () => {
         {
           Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
           Fail: () => Effect.fail(new DomainError({ message: "denied" })),
+          // @ts-expect-error intentionally extra implementation to test error path
           Extra: () => Effect.succeed({ ok: true }),
-        } as never,
+        },
         {
           runtime: Runtime.defaultRuntime,
-        }
-      )
+        },
+      ),
     ).toThrow(/unknown RPC method: Extra/);
   });
 
   it("when a custom rpc channel prefix is configured, then handlers are registered with that prefix", () => {
     const { ipcMain, handlers } = createIpcMainStub();
 
-    const endpoint = createRpcEndpoint(contract, ipcMain, {
-      Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
-      Fail: () => Effect.fail(new DomainError({ message: "denied" })),
-    }, {
-      runtime: Runtime.defaultRuntime,
-      channelPrefix: {
-        rpc: "rpc-custom/",
-        event: "evt-custom/",
+    const endpoint = createRpcEndpoint(
+      contract,
+      ipcMain,
+      {
+        Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
+        Fail: () => Effect.fail(new DomainError({ message: "denied" })),
       },
-    });
+      {
+        runtime: Runtime.defaultRuntime,
+        channelPrefix: {
+          rpc: "rpc-custom/",
+          event: "evt-custom/",
+        },
+      },
+    );
 
     endpoint.start();
     expect(handlers.has("rpc-custom/Add")).toBe(true);
@@ -138,12 +141,17 @@ describe("createRpcEndpoint", () => {
   it("when a handler succeeds, then the endpoint returns a success envelope", async () => {
     const { ipcMain, handlers } = createIpcMainStub();
 
-    const endpoint = createRpcEndpoint(contract, ipcMain, {
-      Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
-      Fail: () => Effect.fail(new DomainError({ message: "denied" })),
-    }, {
-      runtime: Runtime.defaultRuntime,
-    });
+    const endpoint = createRpcEndpoint(
+      contract,
+      ipcMain,
+      {
+        Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
+        Fail: () => Effect.fail(new DomainError({ message: "denied" })),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+      },
+    );
 
     endpoint.start();
 
@@ -160,12 +168,17 @@ describe("createRpcEndpoint", () => {
   it("when a handler fails with a tagged error, then the endpoint returns a typed failure envelope", async () => {
     const { ipcMain, handlers } = createIpcMainStub();
 
-    const endpoint = createRpcEndpoint(contract, ipcMain, {
-      Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
-      Fail: () => Effect.fail(new DomainError({ message: "denied" })),
-    }, {
-      runtime: Runtime.defaultRuntime,
-    });
+    const endpoint = createRpcEndpoint(
+      contract,
+      ipcMain,
+      {
+        Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
+        Fail: () => Effect.fail(new DomainError({ message: "denied" })),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+      },
+    );
 
     endpoint.start();
 
@@ -203,7 +216,7 @@ describe("createRpcEndpoint", () => {
             decodeFailures.push(context);
           },
         },
-      }
+      },
     );
 
     endpoint.start();
@@ -220,17 +233,24 @@ describe("createRpcEndpoint", () => {
     const { ipcMain, handlers } = createIpcMainStub();
     const decodeFailures: Array<Record<string, unknown>> = [];
 
-    const endpoint = createRpcEndpoint(contract, ipcMain, {
-      Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
-      Fail: () => Effect.fail(new DomainError({ message: "denied" })),
-    }, {
-      runtime: Runtime.defaultRuntime,
-      diagnostics: {
-        onDecodeFailure: (context) => {
-          decodeFailures.push(context as unknown as Record<string, unknown>);
+    const endpoint = createRpcEndpoint(
+      contract,
+      ipcMain,
+      {
+        Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
+        Fail: () => Effect.fail(new DomainError({ message: "denied" })),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+        diagnostics: {
+          onDecodeFailure: (context) => {
+            if (isRecord(context)) {
+              decodeFailures.push(context);
+            }
+          },
         },
       },
-    });
+    );
 
     endpoint.start();
     const handler = requireHandler(handlers, "rpc/Add");
@@ -253,12 +273,18 @@ describe("createRpcEndpoint", () => {
     });
     const { ipcMain, handlers } = createIpcMainStub();
 
-    const endpoint = createRpcEndpoint(noErrorContract, ipcMain, {
-      NoErrorMethod: () =>
-        Effect.fail(new DomainError({ message: "typed failure on NoError method" })) as never,
-    }, {
-      runtime: Runtime.defaultRuntime,
-    });
+    const endpoint = createRpcEndpoint(
+      noErrorContract,
+      ipcMain,
+      {
+        // @ts-expect-error intentionally failing a NoError method to test error handling
+        NoErrorMethod: () =>
+          Effect.fail(new DomainError({ message: "typed failure on NoError method" })),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+      },
+    );
 
     endpoint.start();
     const handler = requireHandler(handlers, "rpc/NoErrorMethod");
@@ -278,11 +304,16 @@ describe("createRpcEndpoint", () => {
     });
     const { ipcMain, handlers } = createIpcMainStub();
 
-    const endpoint = createRpcEndpoint(dieContract, ipcMain, {
-      DieMethod: () => Effect.dieMessage("die boom"),
-    }, {
-      runtime: Runtime.defaultRuntime,
-    });
+    const endpoint = createRpcEndpoint(
+      dieContract,
+      ipcMain,
+      {
+        DieMethod: () => Effect.dieMessage("die boom"),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+      },
+    );
 
     endpoint.start();
     const handler = requireHandler(handlers, "rpc/DieMethod");
@@ -295,22 +326,23 @@ describe("createRpcEndpoint", () => {
   });
 
   it("when handler is interrupted, then endpoint responds with defect envelope", async () => {
-    const InterruptMethod = rpc(
-      "InterruptMethod",
-      S.Struct({}),
-      S.Struct({ ok: S.Boolean })
-    );
+    const InterruptMethod = rpc("InterruptMethod", S.Struct({}), S.Struct({ ok: S.Boolean }));
     const interruptContract = defineContract({
       methods: [InterruptMethod] as const,
       events: [] as const,
     });
     const { ipcMain, handlers } = createIpcMainStub();
 
-    const endpoint = createRpcEndpoint(interruptContract, ipcMain, {
-      InterruptMethod: () => Effect.interrupt,
-    }, {
-      runtime: Runtime.defaultRuntime,
-    });
+    const endpoint = createRpcEndpoint(
+      interruptContract,
+      ipcMain,
+      {
+        InterruptMethod: () => Effect.interrupt,
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+      },
+    );
 
     endpoint.start();
     const handler = requireHandler(handlers, "rpc/InterruptMethod");
@@ -323,11 +355,7 @@ describe("createRpcEndpoint", () => {
   });
 
   it("when success payload encoding fails, then protocol diagnostics are reported and defect envelope is returned", async () => {
-    const SuccessEncodeBreak = rpc(
-      "SuccessEncodeBreak",
-      S.Struct({}),
-      S.Struct({ sum: S.Number })
-    );
+    const SuccessEncodeBreak = rpc("SuccessEncodeBreak", S.Struct({}), S.Struct({ sum: S.Number }));
     const successEncodeContract = defineContract({
       methods: [SuccessEncodeBreak] as const,
       events: [] as const,
@@ -335,16 +363,22 @@ describe("createRpcEndpoint", () => {
     const { ipcMain, handlers } = createIpcMainStub();
     const protocolErrors: unknown[] = [];
 
-    const endpoint = createRpcEndpoint(successEncodeContract, ipcMain, {
-      SuccessEncodeBreak: () => Effect.succeed({ sum: "bad" } as never),
-    }, {
-      runtime: Runtime.defaultRuntime,
-      diagnostics: {
-        onProtocolError: (context) => {
-          protocolErrors.push(context);
+    const endpoint = createRpcEndpoint(
+      successEncodeContract,
+      ipcMain,
+      {
+        // @ts-expect-error intentionally wrong success payload type to test encoding failure
+        SuccessEncodeBreak: () => Effect.succeed({ sum: "bad" }),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+        diagnostics: {
+          onProtocolError: (context) => {
+            protocolErrors.push(context);
+          },
         },
       },
-    });
+    );
 
     endpoint.start();
     const handler = requireHandler(handlers, "rpc/SuccessEncodeBreak");
@@ -359,7 +393,7 @@ describe("createRpcEndpoint", () => {
       "FailureEncodeBreak",
       S.Struct({}),
       S.Struct({ ok: S.Boolean }),
-      DomainError
+      DomainError,
     );
     const failureEncodeContract = defineContract({
       methods: [FailureEncodeBreak] as const,
@@ -368,16 +402,22 @@ describe("createRpcEndpoint", () => {
     const { ipcMain, handlers } = createIpcMainStub();
     const protocolErrors: unknown[] = [];
 
-    const endpoint = createRpcEndpoint(failureEncodeContract, ipcMain, {
-      FailureEncodeBreak: () => Effect.fail({ _tag: "DomainError" } as never),
-    }, {
-      runtime: Runtime.defaultRuntime,
-      diagnostics: {
-        onProtocolError: (context) => {
-          protocolErrors.push(context);
+    const endpoint = createRpcEndpoint(
+      failureEncodeContract,
+      ipcMain,
+      {
+        // @ts-expect-error intentionally wrong failure payload to test encoding failure
+        FailureEncodeBreak: () => Effect.fail({ _tag: "DomainError" }),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+        diagnostics: {
+          onProtocolError: (context) => {
+            protocolErrors.push(context);
+          },
         },
       },
-    });
+    );
 
     endpoint.start();
     const handler = requireHandler(handlers, "rpc/FailureEncodeBreak");
@@ -391,17 +431,24 @@ describe("createRpcEndpoint", () => {
     const { ipcMain, handlers } = createIpcMainStub();
     const decodeFailures: Array<Record<string, unknown>> = [];
 
-    const endpoint = createRpcEndpoint(contract, ipcMain, {
-      Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
-      Fail: () => Effect.fail(new DomainError({ message: "denied" })),
-    }, {
-      runtime: Runtime.defaultRuntime,
-      diagnostics: {
-        onDecodeFailure: (context) => {
-          decodeFailures.push(context as unknown as Record<string, unknown>);
+    const endpoint = createRpcEndpoint(
+      contract,
+      ipcMain,
+      {
+        Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
+        Fail: () => Effect.fail(new DomainError({ message: "denied" })),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+        diagnostics: {
+          onDecodeFailure: (context) => {
+            if (isRecord(context)) {
+              decodeFailures.push(context);
+            }
+          },
         },
       },
-    });
+    );
 
     endpoint.start();
     const handler = requireHandler(handlers, "rpc/Add");
@@ -425,16 +472,24 @@ describe("createRpcEndpoint", () => {
     const { ipcMain, handlers } = createIpcMainStub();
     const protocolErrors: Array<Record<string, unknown>> = [];
 
-    const endpoint = createRpcEndpoint(brokenContract, ipcMain, {
-      Broken: () => Effect.succeed({ sum: "bad" } as never),
-    }, {
-      runtime: Runtime.defaultRuntime,
-      diagnostics: {
-        onProtocolError: (context) => {
-          protocolErrors.push(context as unknown as Record<string, unknown>);
+    const endpoint = createRpcEndpoint(
+      brokenContract,
+      ipcMain,
+      {
+        // @ts-expect-error intentionally wrong success payload to test protocol error
+        Broken: () => Effect.succeed({ sum: "bad" }),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+        diagnostics: {
+          onProtocolError: (context) => {
+            if (isRecord(context)) {
+              protocolErrors.push(context);
+            }
+          },
         },
       },
-    });
+    );
 
     endpoint.start();
     const handler = requireHandler(handlers, "rpc/Broken");
@@ -456,16 +511,22 @@ describe("createRpcEndpoint", () => {
     });
     const { ipcMain, handlers } = createIpcMainStub();
 
-    const endpoint = createRpcEndpoint(brokenContract, ipcMain, {
-      Broken: () => Effect.succeed({ sum: "bad" } as never),
-    }, {
-      runtime: Runtime.defaultRuntime,
-      diagnostics: {
-        onProtocolError: () => {
-          throw new Error("diagnostics crashed");
+    const endpoint = createRpcEndpoint(
+      brokenContract,
+      ipcMain,
+      {
+        // @ts-expect-error intentionally wrong success payload to test protocol error
+        Broken: () => Effect.succeed({ sum: "bad" }),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+        diagnostics: {
+          onProtocolError: () => {
+            throw new Error("diagnostics crashed");
+          },
         },
       },
-    });
+    );
 
     endpoint.start();
     const handler = requireHandler(handlers, "rpc/Broken");
@@ -482,20 +543,25 @@ describe("createRpcEndpoint", () => {
     const decodeFailures: unknown[] = [];
     const protocolErrors: unknown[] = [];
 
-    const endpoint = createRpcEndpoint(contract, ipcMain, {
-      Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
-      Fail: () => Effect.fail(new DomainError({ message: "denied" })),
-    }, {
-      runtime: Runtime.defaultRuntime,
-      diagnostics: {
-        onDecodeFailure: (context) => {
-          decodeFailures.push(context);
-        },
-        onProtocolError: (context) => {
-          protocolErrors.push(context);
+    const endpoint = createRpcEndpoint(
+      contract,
+      ipcMain,
+      {
+        Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
+        Fail: () => Effect.fail(new DomainError({ message: "denied" })),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+        diagnostics: {
+          onDecodeFailure: (context) => {
+            decodeFailures.push(context);
+          },
+          onProtocolError: (context) => {
+            protocolErrors.push(context);
+          },
         },
       },
-    });
+    );
 
     endpoint.start();
     const handler = requireHandler(handlers, "rpc/Add");
@@ -518,13 +584,18 @@ describe("createRpcEndpoint", () => {
 
     const { ipcMain, handlers } = createIpcMainStub();
 
-    const endpoint = createRpcEndpoint(throwContract, ipcMain, {
-      ThrowSync: () => {
-        throw new Error("sync boom");
+    const endpoint = createRpcEndpoint(
+      throwContract,
+      ipcMain,
+      {
+        ThrowSync: () => {
+          throw new Error("sync boom");
+        },
       },
-    }, {
-      runtime: Runtime.defaultRuntime,
-    });
+      {
+        runtime: Runtime.defaultRuntime,
+      },
+    );
 
     endpoint.start();
 
@@ -543,12 +614,17 @@ describe("createRpcEndpoint", () => {
   it("when stop or dispose is called repeatedly, then cleanup is idempotent and restart after dispose is rejected", () => {
     const { ipcMain } = createIpcMainStub();
 
-    const endpoint = createRpcEndpoint(contract, ipcMain, {
-      Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
-      Fail: () => Effect.fail(new DomainError({ message: "denied" })),
-    }, {
-      runtime: Runtime.defaultRuntime,
-    });
+    const endpoint = createRpcEndpoint(
+      contract,
+      ipcMain,
+      {
+        Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
+        Fail: () => Effect.fail(new DomainError({ message: "denied" })),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+      },
+    );
 
     endpoint.start();
     endpoint.stop();
@@ -572,12 +648,17 @@ describe("createRpcEndpoint", () => {
       },
     };
 
-    const endpoint = createRpcEndpoint(contract, ipcMain, {
-      Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
-      Fail: () => Effect.fail(new DomainError({ message: "denied" })),
-    }, {
-      runtime: Runtime.defaultRuntime,
-    });
+    const endpoint = createRpcEndpoint(
+      contract,
+      ipcMain,
+      {
+        Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
+        Fail: () => Effect.fail(new DomainError({ message: "denied" })),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+      },
+    );
 
     endpoint.start();
     endpoint.start();
@@ -597,12 +678,17 @@ describe("createRpcEndpoint", () => {
       },
     };
 
-    const endpoint = createRpcEndpoint(contract, ipcMain, {
-      Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
-      Fail: () => Effect.fail(new DomainError({ message: "denied" })),
-    }, {
-      runtime: Runtime.defaultRuntime,
-    });
+    const endpoint = createRpcEndpoint(
+      contract,
+      ipcMain,
+      {
+        Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
+        Fail: () => Effect.fail(new DomainError({ message: "denied" })),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+      },
+    );
 
     endpoint.start();
     endpoint.stop();
@@ -618,7 +704,7 @@ describe("createRpcEndpoint", () => {
     const WithRuntime = rpc(
       "WithRuntime",
       S.Struct({ a: S.Number, b: S.Number }),
-      S.Struct({ sum: S.Number })
+      S.Struct({ sum: S.Number }),
     );
     const runtimeContract = defineContract({
       methods: [WithRuntime] as const,
@@ -626,19 +712,22 @@ describe("createRpcEndpoint", () => {
     });
     const { ipcMain, handlers } = createIpcMainStub();
 
-    const runtime = Runtime.defaultRuntime.pipe(
-      Runtime.provideService(Offset, 5)
-    );
+    const runtime = Runtime.defaultRuntime.pipe(Runtime.provideService(Offset, 5));
 
-    const endpoint = createRpcEndpoint(runtimeContract, ipcMain, {
-      WithRuntime: ({ a, b }) =>
-        Effect.contextWith((ctx) => {
-          const offset = Context.get(ctx, Offset);
-          return { sum: a + b + offset };
-        }),
-    }, {
-      runtime,
-    });
+    const endpoint = createRpcEndpoint(
+      runtimeContract,
+      ipcMain,
+      {
+        WithRuntime: ({ a, b }) =>
+          Effect.contextWith((ctx) => {
+            const offset = Context.get(ctx, Offset);
+            return { sum: a + b + offset };
+          }),
+      },
+      {
+        runtime,
+      },
+    );
 
     endpoint.start();
     const handler = requireHandler(handlers, "rpc/WithRuntime");
@@ -654,7 +743,7 @@ describe("createRpcEndpoint", () => {
     const Parallel = rpc(
       "Parallel",
       S.Struct({ a: S.Number, b: S.Number }),
-      S.Struct({ sum: S.Number })
+      S.Struct({ sum: S.Number }),
     );
     const parallelContract = defineContract({
       methods: [Parallel] as const,
@@ -662,17 +751,22 @@ describe("createRpcEndpoint", () => {
     });
     const { ipcMain, handlers } = createIpcMainStub();
 
-    const endpoint = createRpcEndpoint(parallelContract, ipcMain, {
-      Parallel: ({ a, b }) =>
-        Effect.promise(
-          () =>
-            new Promise<{ sum: number }>((resolve) => {
-              setTimeout(() => resolve({ sum: a + b }), a > b ? 25 : 5);
-            })
-        ),
-    }, {
-      runtime: Runtime.defaultRuntime,
-    });
+    const endpoint = createRpcEndpoint(
+      parallelContract,
+      ipcMain,
+      {
+        Parallel: ({ a, b }) =>
+          Effect.promise(
+            () =>
+              new Promise<{ sum: number }>((resolve) => {
+                setTimeout(() => resolve({ sum: a + b }), a > b ? 25 : 5);
+              }),
+          ),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+      },
+    );
 
     endpoint.start();
     const handler = requireHandler(handlers, "rpc/Parallel");
@@ -711,12 +805,17 @@ describe("createRpcEndpoint", () => {
       },
     };
 
-    const endpoint = createRpcEndpoint(contract, ipcMain, {
-      Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
-      Fail: () => Effect.fail(new DomainError({ message: "denied" })),
-    }, {
-      runtime: Runtime.defaultRuntime,
-    });
+    const endpoint = createRpcEndpoint(
+      contract,
+      ipcMain,
+      {
+        Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
+        Fail: () => Effect.fail(new DomainError({ message: "denied" })),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+      },
+    );
 
     expect(() => endpoint.start()).toThrow(/duplicate channel/);
     expect(endpoint.isRunning()).toBe(false);
@@ -740,12 +839,17 @@ describe("createRpcEndpoint", () => {
       },
     };
 
-    const endpoint = createRpcEndpoint(contract, ipcMain, {
-      Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
-      Fail: () => Effect.fail(new DomainError({ message: "denied" })),
-    }, {
-      runtime: Runtime.defaultRuntime,
-    });
+    const endpoint = createRpcEndpoint(
+      contract,
+      ipcMain,
+      {
+        Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
+        Fail: () => Effect.fail(new DomainError({ message: "denied" })),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+      },
+    );
 
     endpoint.start();
     expect(endpoint.isRunning()).toBe(true);
@@ -763,12 +867,17 @@ describe("createRpcEndpoint", () => {
       },
     };
 
-    const endpoint = createRpcEndpoint(contract, ipcMain, {
-      Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
-      Fail: () => Effect.fail(new DomainError({ message: "denied" })),
-    }, {
-      runtime: Runtime.defaultRuntime,
-    });
+    const endpoint = createRpcEndpoint(
+      contract,
+      ipcMain,
+      {
+        Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
+        Fail: () => Effect.fail(new DomainError({ message: "denied" })),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+      },
+    );
 
     endpoint.start();
     expect(() => endpoint.dispose()).toThrow(/remove failed/);

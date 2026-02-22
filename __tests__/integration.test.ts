@@ -7,12 +7,9 @@ import { createEventPublisher, createRpcEndpoint } from "../src/main.ts";
 import { createEventSubscriber, createRpcClient, RpcDefectError } from "../src/renderer.ts";
 import type { ChannelPrefix, IpcMainLike } from "../src/types.ts";
 
-class AccessDeniedError extends S.TaggedError<AccessDeniedError>()(
-  "AccessDeniedError",
-  {
-    message: S.String,
-  }
-) {}
+class AccessDeniedError extends S.TaggedError<AccessDeniedError>()("AccessDeniedError", {
+  message: S.String,
+}) {}
 
 const waitFor = async (predicate: () => boolean, timeoutMs = 1000) => {
   const start = Date.now();
@@ -108,11 +105,7 @@ const createEventBusHarness = (prefix: ChannelPrefix = { rpc: "rpc/", event: "ev
 
 describe("integration", () => {
   it("when rpc calls roundtrip end-to-end, then success, typed failure, and defect behaviors are preserved", async () => {
-    const Add = rpc(
-      "Add",
-      S.Struct({ a: S.Number, b: S.Number }),
-      S.Struct({ sum: S.Number })
-    );
+    const Add = rpc("Add", S.Struct({ a: S.Number, b: S.Number }), S.Struct({ sum: S.Number }));
     const Fail = rpc("Fail", S.Struct({}), S.Struct({ ok: S.Boolean }), AccessDeniedError);
     const Crash = rpc("Crash", S.Struct({}), S.Struct({ ok: S.Boolean }));
     const contract = defineContract({
@@ -121,13 +114,18 @@ describe("integration", () => {
     });
 
     const { ipcMain, invoke } = createRpcHarness();
-    const endpoint = createRpcEndpoint(contract, ipcMain, {
-      Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
-      Fail: () => Effect.fail(new AccessDeniedError({ message: "denied" })),
-      Crash: () => Effect.dieMessage("boom"),
-    }, {
-      runtime: Runtime.defaultRuntime,
-    });
+    const endpoint = createRpcEndpoint(
+      contract,
+      ipcMain,
+      {
+        Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
+        Fail: () => Effect.fail(new AccessDeniedError({ message: "denied" })),
+        Crash: () => Effect.dieMessage("boom"),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+      },
+    );
     endpoint.start();
 
     const client = createRpcClient(contract, { invoke });
@@ -168,12 +166,17 @@ describe("integration", () => {
     const { ipcMain, invoke } = createRpcHarness(prefix);
     const eventBus = createEventBusHarness(prefix);
 
-    const endpoint = createRpcEndpoint(contract, ipcMain, {
-      Ping: () => Effect.succeed({ ok: true }),
-    }, {
-      runtime: Runtime.defaultRuntime,
-      channelPrefix: prefix,
-    });
+    const endpoint = createRpcEndpoint(
+      contract,
+      ipcMain,
+      {
+        Ping: () => Effect.succeed({ ok: true }),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+        channelPrefix: prefix,
+      },
+    );
     endpoint.start();
 
     const publisher = createEventPublisher(contract, {
@@ -206,7 +209,7 @@ describe("integration", () => {
       S.Struct({
         value: S.Number,
         status: S.String,
-      })
+      }),
     );
     const contract = defineContract({
       methods: [] as const,
@@ -227,9 +230,7 @@ describe("integration", () => {
     });
 
     publisher.start();
-    await Effect.runPromise(
-      publisher.publish(Progress, { value: 10, status: "working" })
-    );
+    await Effect.runPromise(publisher.publish(Progress, { value: 10, status: "working" }));
     await waitFor(() => seen.length === 1);
 
     expect(seen).toEqual([{ value: 10, status: "working" }]);
@@ -246,11 +247,16 @@ describe("integration", () => {
     const { ipcMain, handlers } = createRpcHarness();
     const eventBus = createEventBusHarness();
 
-    const endpoint = createRpcEndpoint(contract, ipcMain, {
-      Ping: () => Effect.succeed({ ok: true }),
-    }, {
-      runtime: Runtime.defaultRuntime,
-    });
+    const endpoint = createRpcEndpoint(
+      contract,
+      ipcMain,
+      {
+        Ping: () => Effect.succeed({ ok: true }),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+      },
+    );
     const publisher = createEventPublisher(contract, {
       getWindows: () => [eventBus.window],
     });

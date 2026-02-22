@@ -2,15 +2,13 @@ import { describe, expect, it } from "bun:test";
 import * as S from "@effect/schema/Schema";
 import { Cause, Effect, Exit } from "effect";
 import { defineContract, exitSchemaFor, rpc } from "../src/contract.ts";
+import { isRecord } from "../src/protocol.ts";
 import { createRpcClient, RpcDefectError } from "../src/renderer.ts";
 import { createInvokeStub } from "../src/testing.ts";
 
-class AccessDeniedError extends S.TaggedError<AccessDeniedError>()(
-  "AccessDeniedError",
-  {
-    message: S.String,
-  }
-) {}
+class AccessDeniedError extends S.TaggedError<AccessDeniedError>()("AccessDeniedError", {
+  message: S.String,
+}) {}
 
 function expectFailure<E>(exit: Exit.Exit<unknown, E>): E {
   if (Exit.isSuccess(exit)) {
@@ -25,29 +23,20 @@ function expectFailure<E>(exit: Exit.Exit<unknown, E>): E {
   return failure.value;
 }
 
-function expectRpcDefect<E>(
-  exit: Exit.Exit<unknown, E>
-): RpcDefectError {
-  const failure = expectFailure(exit as Exit.Exit<unknown, RpcDefectError>);
-  expect(failure).toBeInstanceOf(RpcDefectError);
-  return failure as RpcDefectError;
+function expectRpcDefect(exit: Exit.Exit<unknown, unknown>): RpcDefectError {
+  const failure = expectFailure(exit);
+  if (!(failure instanceof RpcDefectError)) {
+    throw new Error(`Expected RpcDefectError, got: ${typeof failure}`);
+  }
+  return failure;
 }
 
 describe("createRpcClient", () => {
-  const Add = rpc(
-    "Add",
-    S.Struct({ a: S.Number, b: S.Number }),
-    S.Struct({ sum: S.Number })
-  );
+  const Add = rpc("Add", S.Struct({ a: S.Number, b: S.Number }), S.Struct({ sum: S.Number }));
 
   const Ping = rpc("Ping", S.Struct({}), S.Struct({ ok: S.Boolean }));
 
-  const MayFail = rpc(
-    "MayFail",
-    S.Struct({}),
-    S.Struct({ ok: S.Boolean }),
-    AccessDeniedError
-  );
+  const MayFail = rpc("MayFail", S.Struct({}), S.Struct({ ok: S.Boolean }), AccessDeniedError);
 
   const contract = defineContract({
     methods: [Add, Ping, MayFail] as const,
@@ -55,14 +44,10 @@ describe("createRpcClient", () => {
   });
 
   it("when rpc client is created without an invoke function, then creation throws", () => {
-    const createWithoutOptions = createRpcClient as unknown as (
-      c: typeof contract,
-      options?: unknown
-    ) => unknown;
-
-    expect(() => createWithoutOptions(contract)).toThrow(
-      /RpcClientOptions.invoke is required/
-    );
+    expect(() => {
+      // @ts-expect-error intentionally omitting required options to test error path
+      createRpcClient(contract);
+    }).toThrow(/RpcClientOptions.invoke is required/);
   });
 
   it("when a call succeeds, then the client encodes the request and decodes the success envelope", async () => {
@@ -84,11 +69,7 @@ describe("createRpcClient", () => {
   });
 
   it("when a method name contains special characters, then the client invokes that exact method name", async () => {
-    const MethodWithPath = rpc(
-      "system/get.version",
-      S.Struct({}),
-      S.Struct({ ok: S.Boolean })
-    );
+    const MethodWithPath = rpc("system/get.version", S.Struct({}), S.Struct({ ok: S.Boolean }));
     const specialContract = defineContract({
       methods: [MethodWithPath] as const,
       events: [] as const,
@@ -323,7 +304,9 @@ describe("createRpcClient", () => {
       invoke,
       diagnostics: {
         onDecodeFailure: (context) => {
-          decodeFailures.push(context as unknown as Record<string, unknown>);
+          if (isRecord(context)) {
+            decodeFailures.push(context);
+          }
         },
       },
     });
@@ -348,7 +331,9 @@ describe("createRpcClient", () => {
       invoke,
       diagnostics: {
         onProtocolError: (context) => {
-          protocolErrors.push(context as unknown as Record<string, unknown>);
+          if (isRecord(context)) {
+            protocolErrors.push(context);
+          }
         },
       },
     });
@@ -430,11 +415,7 @@ describe("createRpcClient", () => {
   });
 
   it("when undefined is passed explicitly, then the client forwards undefined", async () => {
-    const AcceptUndefined = rpc(
-      "AcceptUndefined",
-      S.Undefined,
-      S.Struct({ ok: S.Boolean })
-    );
+    const AcceptUndefined = rpc("AcceptUndefined", S.Undefined, S.Struct({ ok: S.Boolean }));
     const undefinedContract = defineContract({
       methods: [AcceptUndefined] as const,
       events: [] as const,
@@ -445,10 +426,9 @@ describe("createRpcClient", () => {
     }));
 
     const client = createRpcClient(undefinedContract, { invoke });
-    const acceptUndefined =
-      client.AcceptUndefined as unknown as (
-        value: undefined
-      ) => Effect.Effect<{ ok: boolean }, RpcDefectError>;
+    // @ts-expect-error testing undefined input passthrough
+    const acceptUndefined: (value: undefined) => Effect.Effect<{ ok: boolean }, RpcDefectError> =
+      client.AcceptUndefined;
     const result = await Effect.runPromise(acceptUndefined(undefined));
 
     expect(result).toEqual({ ok: true });
@@ -472,11 +452,8 @@ describe("createRpcClient", () => {
       data: { ok: true },
     }));
     const client = createRpcClient(nullContract, { invoke });
-    const noArgCaller =
-      client.AcceptNull as unknown as () => Effect.Effect<
-        { ok: boolean },
-        RpcDefectError
-      >;
+    // @ts-expect-error intentionally calling without required argument
+    const noArgCaller: () => Effect.Effect<{ ok: boolean }, RpcDefectError> = client.AcceptNull;
 
     const exit = await Effect.runPromiseExit(noArgCaller());
     const defect = expectRpcDefect(exit);
@@ -548,7 +525,7 @@ describe("createRpcClient", () => {
     const encodeLegacyExit = S.encodeUnknownSync(exitSchemaFor(MayFail));
     const invoke = createInvokeStub(async () => {
       const exit = await Effect.runPromiseExit(
-        Effect.fail(new AccessDeniedError({ message: "denied-legacy" }))
+        Effect.fail(new AccessDeniedError({ message: "denied-legacy" })),
       );
       return encodeLegacyExit(exit);
     });

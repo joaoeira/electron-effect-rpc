@@ -10,12 +10,7 @@ import {
 } from "../src/index.ts";
 import { createEventPublisher } from "../src/main.ts";
 import { createEventSubscriber, createRpcClient } from "../src/renderer.ts";
-import type {
-  Implementations,
-  RpcClient,
-  RpcDefectError,
-  RpcMethodError,
-} from "../src/types.ts";
+import type { Implementations, RpcClient, RpcDefectError, RpcMethodError } from "../src/types.ts";
 import type {
   IpcBridge,
   IpcBridgeGlobal,
@@ -24,12 +19,9 @@ import type {
   IpcMainHandle,
 } from "../src/index.ts";
 
-class AccessDeniedError extends S.TaggedError<AccessDeniedError>()(
-  "AccessDeniedError",
-  {
-    message: S.String,
-  }
-) {}
+class AccessDeniedError extends S.TaggedError<AccessDeniedError>()("AccessDeniedError", {
+  message: S.String,
+}) {}
 
 const EmptyReq = rpc("EmptyReq", S.Struct({}), S.String);
 const NeedsReq = rpc("NeedsReq", S.Struct({ value: S.Number }), S.String);
@@ -78,10 +70,8 @@ client.NullReq();
 
 // rpcCaller_error_channels_are_explicit_effect_types
 const noErrEffect: Effect.Effect<string, RpcDefectError> = client.NoErr();
-const withErrEffect: Effect.Effect<
-  string,
-  RpcError<typeof WithErr> | RpcDefectError
-> = client.WithErr();
+const withErrEffect: Effect.Effect<string, RpcError<typeof WithErr> | RpcDefectError> =
+  client.WithErr();
 void noErrEffect;
 void withErrEffect;
 
@@ -150,20 +140,17 @@ publisher.publish(Progress, { value: "1", label: "progress" });
 
 type Assert<T extends true> = T;
 type IsNever<T> = [T] extends [never] ? true : false;
-type IsEqual<A, B> = (<T>() => T extends A ? 1 : 2) extends (
-  <T>() => T extends B ? 1 : 2
-)
-  ? true
-  : false;
+type IsEqual<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 type ErrorOf<T> = T extends Effect.Effect<unknown, infer E, unknown> ? E : never;
 
 // NoError_methods_have_never_error_channel
 type _NoErrIsNever = Assert<IsNever<RpcError<typeof NoErr>>>;
-type _WithErrIsNotNever = Assert<
-  IsNever<RpcError<typeof WithErr>> extends false ? true : false
->;
-void (0 as unknown as _NoErrIsNever);
-void (0 as unknown as _WithErrIsNotNever);
+type _WithErrIsNotNever = Assert<IsNever<RpcError<typeof WithErr>> extends false ? true : false>;
+declare const _noErrIsNever: _NoErrIsNever;
+declare const _withErrIsNotNever: _WithErrIsNotNever;
+void _noErrIsNever;
+void _withErrIsNotNever;
 
 // rpcMethodError_channel_contract
 type _NoErrClientChannelIsDefectOnly = Assert<
@@ -172,8 +159,10 @@ type _NoErrClientChannelIsDefectOnly = Assert<
 type _WithErrClientChannelIsDomainPlusDefect = Assert<
   IsEqual<ErrorOf<ReturnType<typeof client.WithErr>>, RpcMethodError<typeof WithErr>>
 >;
-void (0 as unknown as _NoErrClientChannelIsDefectOnly);
-void (0 as unknown as _WithErrClientChannelIsDomainPlusDefect);
+declare const _noErrClientChannelIsDefectOnly: _NoErrClientChannelIsDefectOnly;
+declare const _withErrClientChannelIsDomainPlusDefect: _WithErrClientChannelIsDomainPlusDefect;
+void _noErrClientChannelIsDefectOnly;
+void _withErrClientChannelIsDomainPlusDefect;
 
 type _RootSmokeTypes = {
   bridge: IpcBridge;
@@ -182,7 +171,8 @@ type _RootSmokeTypes = {
   kitOptions: IpcKitOptions<typeof rootContract>;
   mainHandle: IpcMainHandle<typeof rootContract>;
 };
-void (0 as unknown as _RootSmokeTypes);
+declare const _rootSmokeTypes: _RootSmokeTypes;
+void _rootSmokeTypes;
 void eventRoot;
 
 type RootModule = typeof import("../src/index.ts");

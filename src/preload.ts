@@ -1,5 +1,6 @@
 import * as electronModule from "electron";
 import type { IpcRendererEvent } from "electron";
+import { isRecord } from "./protocol.ts";
 import {
   defaultChannelPrefix,
   type ChannelPrefix,
@@ -34,39 +35,49 @@ type IpcRendererLike = {
   readonly invoke: (channel: string, payload: unknown) => Promise<unknown>;
   readonly on: (
     channel: string,
-    handler: (event: IpcRendererEvent, payload: unknown) => void
+    handler: (event: IpcRendererEvent, payload: unknown) => void,
   ) => void;
   readonly removeListener: (
     channel: string,
-    handler: (event: IpcRendererEvent, payload: unknown) => void
+    handler: (event: IpcRendererEvent, payload: unknown) => void,
   ) => void;
 };
+
+function isContextBridgeLike(value: unknown): value is ContextBridgeLike {
+  return isRecord(value) && typeof value.exposeInMainWorld === "function";
+}
+
+function isIpcRendererLike(value: unknown): value is IpcRendererLike {
+  return (
+    isRecord(value) &&
+    typeof value.invoke === "function" &&
+    typeof value.on === "function" &&
+    typeof value.removeListener === "function"
+  );
+}
 
 function resolveElectronRendererBindings(): {
   readonly contextBridge: ContextBridgeLike;
   readonly ipcRenderer: IpcRendererLike;
 } {
-  const moduleDefault = (electronModule as { readonly default?: unknown }).default;
-  const source =
-    moduleDefault && typeof moduleDefault === "object"
-      ? (moduleDefault as Record<string, unknown>)
-      : (electronModule as Record<string, unknown>);
+  const mod: unknown = electronModule;
+  const moduleDefault = isRecord(mod) ? mod.default : undefined;
+  const source = isRecord(moduleDefault) ? moduleDefault : isRecord(mod) ? mod : undefined;
 
-  const contextBridge = source.contextBridge as ContextBridgeLike | undefined;
-  const ipcRenderer = source.ipcRenderer as IpcRendererLike | undefined;
+  if (!source) {
+    throw new Error("electron-effect-rpc/preload requires Electron preload runtime bindings.");
+  }
 
-  if (!contextBridge || !ipcRenderer) {
-    throw new Error(
-      "electron-effect-rpc/preload requires Electron preload runtime bindings."
-    );
+  const { contextBridge, ipcRenderer } = source;
+
+  if (!isContextBridgeLike(contextBridge) || !isIpcRendererLike(ipcRenderer)) {
+    throw new Error("electron-effect-rpc/preload requires Electron preload runtime bindings.");
   }
 
   return { contextBridge, ipcRenderer };
 }
 
-export function createBridgeAdapters(
-  options?: BridgeAdaptersOptions
-): BridgeAdapters {
+export function createBridgeAdapters(options?: BridgeAdaptersOptions): BridgeAdapters {
   const channelPrefix = options?.channelPrefix ?? defaultChannelPrefix;
   const { ipcRenderer } = resolveElectronRendererBindings();
 
@@ -74,8 +85,7 @@ export function createBridgeAdapters(
     ipcRenderer.invoke(`${channelPrefix.rpc}${method}`, payload);
 
   const subscribe: EventSubscribe = (event, listener) => {
-    const wrapped = (_event: IpcRendererEvent, payload: unknown) =>
-      listener(payload);
+    const wrapped = (_event: IpcRendererEvent, payload: unknown) => listener(payload);
 
     const channel = `${channelPrefix.event}${event}`;
     ipcRenderer.on(channel, wrapped);
@@ -87,8 +97,7 @@ export function createBridgeAdapters(
 
   const onStreamFrame = (listener: (frame: unknown) => void) => {
     const channel = `${channelPrefix.rpc}sf`;
-    const wrapped = (_event: IpcRendererEvent, frame: unknown) =>
-      listener(frame);
+    const wrapped = (_event: IpcRendererEvent, frame: unknown) => listener(frame);
     ipcRenderer.on(channel, wrapped);
     return () => {
       ipcRenderer.removeListener(channel, wrapped);

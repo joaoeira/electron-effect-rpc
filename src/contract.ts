@@ -15,7 +15,7 @@ export interface RpcMethod<
   Name extends string,
   Req extends SchemaNoContext,
   Res extends SchemaNoContext,
-  Err extends ErrorSchema = NoError
+  Err extends ErrorSchema = NoError,
 > {
   readonly name: Name;
   readonly req: Req;
@@ -27,20 +27,20 @@ export function rpc<
   const Name extends string,
   Req extends SchemaNoContext,
   Res extends SchemaNoContext,
-  Err extends ErrorSchema
+  Err extends ErrorSchema,
 >(name: Name, req: Req, res: Res, err: Err): RpcMethod<Name, Req, Res, Err>;
 
 export function rpc<
   const Name extends string,
   Req extends SchemaNoContext,
-  Res extends SchemaNoContext
+  Res extends SchemaNoContext,
 >(name: Name, req: Req, res: Res): RpcMethod<Name, Req, Res, NoError>;
 
 export function rpc<const Name extends string>(
   name: Name,
   req: SchemaNoContext,
   res: SchemaNoContext,
-  err: ErrorSchema = NoError
+  err: ErrorSchema = NoError,
 ): RpcMethod<Name, SchemaNoContext, SchemaNoContext, ErrorSchema> {
   return { name, req, res, err };
 }
@@ -48,7 +48,7 @@ export function rpc<const Name extends string>(
 export interface RpcEvent<
   Payload extends SchemaNoContext,
   Context extends SchemaNoContext | null,
-  Name extends string = string
+  Name extends string = string,
 > {
   readonly name: Name;
   readonly payload: Payload;
@@ -58,18 +58,18 @@ export interface RpcEvent<
 export function event<
   const Name extends string,
   Payload extends SchemaNoContext,
-  Context extends SchemaNoContext
+  Context extends SchemaNoContext,
 >(name: Name, payload: Payload, context: Context): RpcEvent<Payload, Context, Name>;
 
 export function event<const Name extends string, Payload extends SchemaNoContext>(
   name: Name,
-  payload: Payload
+  payload: Payload,
 ): RpcEvent<Payload, null, Name>;
 
 export function event<const Name extends string>(
   name: Name,
   payload: SchemaNoContext,
-  context?: SchemaNoContext | null
+  context?: SchemaNoContext | null,
 ): RpcEvent<SchemaNoContext, SchemaNoContext | null, Name> {
   return { name, payload, context: context ?? null };
 }
@@ -78,9 +78,9 @@ export const exitSchemaFor = <
   Name extends string,
   Req extends SchemaNoContext,
   Res extends SchemaNoContext,
-  Err extends ErrorSchema
+  Err extends ErrorSchema,
 >(
-  method: RpcMethod<Name, Req, Res, Err>
+  method: RpcMethod<Name, Req, Res, Err>,
 ) =>
   S.Exit({
     success: method.res,
@@ -92,7 +92,7 @@ export interface StreamRpcMethod<
   Name extends string,
   Req extends SchemaNoContext,
   Chunk extends SchemaNoContext,
-  Err extends ErrorSchema = NoError
+  Err extends ErrorSchema = NoError,
 > {
   readonly _tag: "StreamRpcMethod";
   readonly name: Name;
@@ -105,20 +105,20 @@ export function streamRpc<
   const Name extends string,
   Req extends SchemaNoContext,
   Chunk extends SchemaNoContext,
-  Err extends ErrorSchema
+  Err extends ErrorSchema,
 >(name: Name, req: Req, chunk: Chunk, err: Err): StreamRpcMethod<Name, Req, Chunk, Err>;
 
 export function streamRpc<
   const Name extends string,
   Req extends SchemaNoContext,
-  Chunk extends SchemaNoContext
+  Chunk extends SchemaNoContext,
 >(name: Name, req: Req, chunk: Chunk): StreamRpcMethod<Name, Req, Chunk, NoError>;
 
 export function streamRpc<const Name extends string>(
   name: Name,
   req: SchemaNoContext,
   chunk: SchemaNoContext,
-  err: ErrorSchema = NoError
+  err: ErrorSchema = NoError,
 ): StreamRpcMethod<Name, SchemaNoContext, SchemaNoContext, ErrorSchema> {
   return { _tag: "StreamRpcMethod", name, req, chunk, err };
 }
@@ -138,15 +138,10 @@ export type StreamError<M extends AnyStreamMethod> = S.Schema.Type<M["err"]>;
 
 export type ExtractStreamMethod<
   Methods extends readonly AnyStreamMethod[],
-  Name extends string
+  Name extends string,
 > = Extract<Methods[number], { readonly name: Name }>;
 
-export type AnyMethod = RpcMethod<
-  string,
-  SchemaNoContext,
-  SchemaNoContext,
-  ErrorSchema
->;
+export type AnyMethod = RpcMethod<string, SchemaNoContext, SchemaNoContext, ErrorSchema>;
 
 export type AnyEvent = RpcEvent<SchemaNoContext, SchemaNoContext | null, string>;
 
@@ -159,15 +154,15 @@ export type RpcError<M extends AnyMethod> = S.Schema.Type<M["err"]>;
 export type RpcEventPayload<E extends AnyEvent> = S.Schema.Type<E["payload"]>;
 
 /** Extract a method from a tuple by its name string literal. */
-export type ExtractMethod<
-  Methods extends readonly AnyMethod[],
-  Name extends string
-> = Extract<Methods[number], { readonly name: Name }>;
+export type ExtractMethod<Methods extends readonly AnyMethod[], Name extends string> = Extract<
+  Methods[number],
+  { readonly name: Name }
+>;
 
 export interface RpcContract<
   Methods extends ReadonlyArray<AnyMethod>,
   Events extends ReadonlyArray<AnyEvent>,
-  StreamMethods extends ReadonlyArray<AnyStreamMethod> = readonly []
+  StreamMethods extends ReadonlyArray<AnyStreamMethod> = readonly [],
 > {
   readonly methods: Methods;
   readonly events: Events;
@@ -198,13 +193,11 @@ function hasReservedStreamPrefix(name: string): boolean {
 function validateReservedNames(names: ReadonlyArray<string>, kind: string): void {
   for (const name of names) {
     if (RESERVED_STREAM_NAMES.has(name)) {
-      throw new Error(
-        `${kind} name "${name}" is reserved for internal stream transport.`
-      );
+      throw new Error(`${kind} name "${name}" is reserved for internal stream transport.`);
     }
     if (hasReservedStreamPrefix(name)) {
       throw new Error(
-        `${kind} name "${name}" must not start with "stream/" (reserved for internal stream transport).`
+        `${kind} name "${name}" must not start with "stream/" (reserved for internal stream transport).`,
       );
     }
   }
@@ -213,16 +206,28 @@ function validateReservedNames(names: ReadonlyArray<string>, kind: string): void
 export function defineContract<
   const Methods extends ReadonlyArray<AnyMethod>,
   const Events extends ReadonlyArray<AnyEvent>,
-  const StreamMethods extends ReadonlyArray<AnyStreamMethod> = readonly []
->(
-  input: {
-    readonly methods: Methods;
-    readonly events: Events;
-    readonly streamMethods?: StreamMethods;
-  }
-): RpcContract<Methods, Events, StreamMethods> {
+>(input: {
+  readonly methods: Methods;
+  readonly events: Events;
+}): RpcContract<Methods, Events, readonly []>;
+
+export function defineContract<
+  const Methods extends ReadonlyArray<AnyMethod>,
+  const Events extends ReadonlyArray<AnyEvent>,
+  const StreamMethods extends ReadonlyArray<AnyStreamMethod>,
+>(input: {
+  readonly methods: Methods;
+  readonly events: Events;
+  readonly streamMethods: StreamMethods;
+}): RpcContract<Methods, Events, StreamMethods>;
+
+export function defineContract(input: {
+  readonly methods: ReadonlyArray<AnyMethod>;
+  readonly events: ReadonlyArray<AnyEvent>;
+  readonly streamMethods?: ReadonlyArray<AnyStreamMethod>;
+}): RpcContract<ReadonlyArray<AnyMethod>, ReadonlyArray<AnyEvent>, ReadonlyArray<AnyStreamMethod>> {
   const { methods, events } = input;
-  const streamMethods = (input.streamMethods ?? []) as unknown as StreamMethods;
+  const streamMethods = input.streamMethods ?? [];
 
   if (!Array.isArray(methods)) {
     throw new Error("RPC contract methods must be an array.");
@@ -241,29 +246,23 @@ export function defineContract<
 
   const duplicateMethods = collectDuplicates(methodNames);
   if (duplicateMethods.length > 0) {
-    throw new Error(
-      `Duplicate RPC method name(s): ${duplicateMethods.join(", ")}`
-    );
+    throw new Error(`Duplicate RPC method name(s): ${duplicateMethods.join(", ")}`);
   }
 
   const duplicateEvents = collectDuplicates(events.map((event) => event.name));
   if (duplicateEvents.length > 0) {
-    throw new Error(
-      `Duplicate RPC event name(s): ${duplicateEvents.join(", ")}`
-    );
+    throw new Error(`Duplicate RPC event name(s): ${duplicateEvents.join(", ")}`);
   }
 
   const duplicateStreamMethods = collectDuplicates(streamMethodNames);
   if (duplicateStreamMethods.length > 0) {
-    throw new Error(
-      `Duplicate stream method name(s): ${duplicateStreamMethods.join(", ")}`
-    );
+    throw new Error(`Duplicate stream method name(s): ${duplicateStreamMethods.join(", ")}`);
   }
 
   const crossDuplicates = collectDuplicates([...methodNames, ...streamMethodNames]);
   if (crossDuplicates.length > 0) {
     throw new Error(
-      `Name collision between methods and streamMethods: ${crossDuplicates.join(", ")}`
+      `Name collision between methods and streamMethods: ${crossDuplicates.join(", ")}`,
     );
   }
 

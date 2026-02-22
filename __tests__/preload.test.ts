@@ -4,8 +4,7 @@ type ExposedGlobals = Record<string, Record<string, unknown>>;
 
 const exposedGlobals: ExposedGlobals = Object.create(null);
 const invokeCalls: Array<{ channel: string; payload: unknown }> = [];
-const onCalls: Array<{ channel: string; handler: (event: unknown, payload: unknown) => void }> =
-  [];
+const onCalls: Array<{ channel: string; handler: (event: unknown, payload: unknown) => void }> = [];
 const removeCalls: Array<{
   channel: string;
   handler: (event: unknown, payload: unknown) => void;
@@ -25,10 +24,7 @@ const electronModule = {
     on: (channel: string, handler: (event: unknown, payload: unknown) => void) => {
       onCalls.push({ channel, handler });
     },
-    removeListener: (
-      channel: string,
-      handler: (event: unknown, payload: unknown) => void
-    ) => {
+    removeListener: (channel: string, handler: (event: unknown, payload: unknown) => void) => {
       removeCalls.push({ channel, handler });
     },
   },
@@ -36,7 +32,8 @@ const electronModule = {
 
 mock.module("electron", () => electronModule);
 
-const { createBridgeAdapters, exposeIpcBridge, exposeRpcBridge } = await import("../src/preload.ts");
+const { createBridgeAdapters, exposeIpcBridge, exposeRpcBridge } =
+  await import("../src/preload.ts");
 
 describe("preload bridge", () => {
   beforeEach(() => {
@@ -143,16 +140,15 @@ describe("preload bridge", () => {
       channelPrefix: { rpc: "rpc-x/", event: "evt-x/" },
     });
 
-    const invoke = exposedGlobals.rpcApi?.invoke as
-      | ((method: string, payload: unknown) => Promise<unknown>)
-      | undefined;
-    const subscribe = exposedGlobals.rpcEvents?.subscribe as
-      | ((name: string, listener: (payload: unknown) => void) => () => void)
-      | undefined;
+    const invokeRaw = exposedGlobals.rpcApi?.invoke;
+    const subscribeRaw = exposedGlobals.rpcEvents?.subscribe;
 
-    if (!invoke || !subscribe) {
+    if (typeof invokeRaw !== "function" || typeof subscribeRaw !== "function") {
       throw new Error("expected bridge globals");
     }
+
+    const invoke = invokeRaw;
+    const subscribe = subscribeRaw;
 
     await invoke("Method", { v: 1 });
     const unsubscribe = subscribe("Progress", () => {});
@@ -178,16 +174,15 @@ describe("preload bridge", () => {
     });
 
     const api = exposedGlobals.bridge;
-    const invoke = api?.invoke as
-      | ((method: string, payload: unknown) => Promise<unknown>)
-      | undefined;
-    const subscribe = api?.subscribe as
-      | ((name: string, listener: (payload: unknown) => void) => () => void)
-      | undefined;
+    const invokeRaw = api?.invoke;
+    const subscribeRaw = api?.subscribe;
 
-    if (!invoke || !subscribe) {
+    if (typeof invokeRaw !== "function" || typeof subscribeRaw !== "function") {
       throw new Error("expected exposed bridge global");
     }
+
+    const invoke = invokeRaw;
+    const subscribe = subscribeRaw;
 
     await invoke("Method", { ok: true });
     const unsubscribe = subscribe("Progress", () => {});

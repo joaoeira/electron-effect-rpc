@@ -12,18 +12,15 @@ Define errors as tagged schemas and attach them to the RPC method.
 import * as S from "@effect/schema/Schema";
 import { rpc } from "electron-effect-rpc/contract";
 
-export class AccessDeniedError extends S.TaggedError<AccessDeniedError>()(
-  "AccessDeniedError",
-  {
-    message: S.String,
-  }
-) {}
+export class AccessDeniedError extends S.TaggedError<AccessDeniedError>()("AccessDeniedError", {
+  message: S.String,
+}) {}
 
 export const DeleteFile = rpc(
   "DeleteFile",
   S.Struct({ path: S.String }),
   S.Struct({ ok: S.Boolean }),
-  AccessDeniedError
+  AccessDeniedError,
 );
 ```
 
@@ -55,15 +52,15 @@ await Effect.runPromise(
       Effect.sync(() => {
         // expected domain path
         console.warn(error.message);
-      })
+      }),
     ),
     Effect.catchTag("RpcDefectError", (error: RpcDefectError) =>
       Effect.sync(() => {
         // unexpected defect path
         console.error(error.code, error.message, error.cause);
-      })
-    )
-  )
+      }),
+    ),
+  ),
 );
 ```
 

@@ -2,6 +2,22 @@
   "name": "electron-effect-rpc",
   "version": "0.5.0",
   "description": "Typed IPC RPC for Electron, built on Effect and @effect/schema",
+  "keywords": [
+    "effect",
+    "electron",
+    "ipc",
+    "rpc",
+    "schema",
+    "typed"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/joaoeira/electron-effect-rpc"
+  },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "exports": {
     ".": {
@@ -33,9 +49,6 @@
       "default": "./dist/testing.js"
     }
   },
-  "files": [
-    "dist"
-  ],
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "bun run build",
@@ -46,25 +59,11 @@
     "test:stress": "bun test __tests__/stress.test.ts",
     "test:full": "bun run test:unit && bun run test:types && bun run test:packaging && bun run test:integration && bun run test:stress",
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
-  },
-  "keywords": [
-    "electron",
-    "effect",
-    "rpc",
-    "ipc",
-    "typed",
-    "schema"
-  ],
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/joaoeira/electron-effect-rpc"
-  },
-  "peerDependencies": {
-    "@effect/schema": ">=0.69.0",
-    "effect": ">=3.0.0",
-    "electron": ">=28.0.0"
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "fmt": "oxfmt --write .",
+    "fmt:check": "oxfmt --check ."
   },
   "devDependencies": {
     "@effect/schema": "^0.69.0",
@@ -72,6 +71,13 @@
     "bun-types": "^1.1.0",
     "effect": "^3.11.0",
     "electron": "^38.0.0",
+    "oxfmt": "^0.34.0",
+    "oxlint": "^1.49.0",
     "typescript": "^5.7.0"
+  },
+  "peerDependencies": {
+    "@effect/schema": ">=0.69.0",
+    "effect": ">=3.0.0",
+    "electron": ">=28.0.0"
   }
 }

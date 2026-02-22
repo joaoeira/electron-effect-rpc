@@ -17,16 +17,13 @@ export type RpcDefectEnvelope = {
   readonly cause?: unknown;
 };
 
-export type RpcResponseEnvelope =
-  | RpcSuccessEnvelope
-  | RpcFailureEnvelope
-  | RpcDefectEnvelope;
+export type RpcResponseEnvelope = RpcSuccessEnvelope | RpcFailureEnvelope | RpcDefectEnvelope;
 
 function hasOwn(record: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(record, key);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
@@ -46,10 +43,7 @@ export function extractErrorTag(error: unknown): string {
   return "RpcError";
 }
 
-export function toDefectEnvelope(
-  cause: unknown,
-  prefix?: string
-): RpcDefectEnvelope {
+export function toDefectEnvelope(cause: unknown, prefix?: string): RpcDefectEnvelope {
   const causeText = formatUnknown(cause);
   return {
     type: "defect",
@@ -58,10 +52,7 @@ export function toDefectEnvelope(
   };
 }
 
-export function safelyCall<T>(
-  callback: ((context: T) => void) | undefined,
-  context: T
-): void {
+export function safelyCall<T>(callback: ((context: T) => void) | undefined, context: T): void {
   if (!callback) {
     return;
   }
@@ -99,11 +90,7 @@ export type StreamDefectFrame = {
   readonly message: string;
 };
 
-export type StreamFrame =
-  | StreamDataFrame
-  | StreamEndFrame
-  | StreamErrorFrame
-  | StreamDefectFrame;
+export type StreamFrame = StreamDataFrame | StreamEndFrame | StreamErrorFrame | StreamDefectFrame;
 
 export function extractStreamIdFromRaw(value: unknown): string | null {
   if (!isRecord(value) || typeof value.streamId !== "string") {
@@ -158,9 +145,7 @@ export function parseStreamFrame(value: unknown): StreamFrame | null {
   }
 }
 
-export function parseRpcResponseEnvelope(
-  value: unknown
-): RpcResponseEnvelope | null {
+export function parseRpcResponseEnvelope(value: unknown): RpcResponseEnvelope | null {
   if (!isRecord(value) || typeof value.type !== "string") {
     return null;
   }

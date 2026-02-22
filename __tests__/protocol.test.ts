@@ -65,7 +65,7 @@ describe("protocol", () => {
         error: {
           tag: "X",
         },
-      })
+      }),
     ).toBeNull();
     expect(parseRpcResponseEnvelope({ type: "defect", cause: "x" })).toBeNull();
   });
@@ -75,9 +75,7 @@ describe("protocol", () => {
   });
 
   it("when error has a _tag field, then extractErrorTag returns that tag", () => {
-    expect(extractErrorTag({ _tag: "TaggedDomainError", message: "x" })).toBe(
-      "TaggedDomainError"
-    );
+    expect(extractErrorTag({ _tag: "TaggedDomainError", message: "x" })).toBe("TaggedDomainError");
   });
 
   it("when error has no _tag but is an Error instance, then extractErrorTag returns error.name", () => {
@@ -110,10 +108,13 @@ describe("protocol", () => {
     let callCount = 0;
 
     expect(() =>
-      safelyCall(() => {
-        callCount += 1;
-        throw new Error("diagnostics blew up");
-      }, { scope: "test" })
+      safelyCall(
+        () => {
+          callCount += 1;
+          throw new Error("diagnostics blew up");
+        },
+        { scope: "test" },
+      ),
     ).not.toThrow();
 
     expect(callCount).toBe(1);

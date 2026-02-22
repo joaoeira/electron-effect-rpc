@@ -22,7 +22,6 @@ import {
   type OnStreamFrame,
   type RendererWindowLike,
   type RpcClient,
-  type RpcClientDiagnostics,
   type RpcEndpoint,
   type RpcEndpointDiagnostics,
   type RpcEventPublisher,
@@ -44,7 +43,7 @@ export type IpcBridgeGlobal<Name extends string = "api"> = {
 };
 
 export type IpcKitOptions<
-  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>
+  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>,
 > = {
   readonly contract: C;
   readonly channelPrefix?: ChannelPrefix;
@@ -59,7 +58,7 @@ export type IpcKitOptions<
 
 type IpcMainOptions<
   C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>,
-  R
+  R,
 > = {
   readonly ipcMain: IpcMainLike;
   readonly handlers: Implementations<C, R>;
@@ -74,7 +73,7 @@ type IpcMainOptions<
 };
 
 export type IpcMainHandle<
-  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>
+  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>,
 > = {
   readonly endpoint: RpcEndpoint;
   readonly publisher: RpcEventPublisher<C>;
@@ -84,7 +83,7 @@ export type IpcMainHandle<
   readonly isRunning: () => boolean;
   readonly publish: <E extends C["events"][number]>(
     event: E,
-    payload: RpcEventPayload<E>
+    payload: RpcEventPayload<E>,
   ) => Effect.Effect<void, never>;
   readonly stats: () => {
     readonly queued: number;
@@ -93,7 +92,7 @@ export type IpcMainHandle<
 };
 
 export type IpcKit<
-  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>
+  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>,
 > = {
   readonly contract: C;
   readonly config: {
@@ -119,9 +118,9 @@ export type IpcKit<
 export function createIpcKit<
   const Methods extends ReadonlyArray<AnyMethod>,
   const Events extends ReadonlyArray<AnyEvent>,
-  const StreamMethods extends ReadonlyArray<AnyStreamMethod> = readonly []
+  const StreamMethods extends ReadonlyArray<AnyStreamMethod> = readonly [],
 >(
-  options: IpcKitOptions<RpcContract<Methods, Events, StreamMethods>>
+  options: IpcKitOptions<RpcContract<Methods, Events, StreamMethods>>,
 ): IpcKit<RpcContract<Methods, Events, StreamMethods>> {
   const contract = options.contract;
   const channelPrefix = options.channelPrefix
@@ -132,19 +131,14 @@ export function createIpcKit<
   const eventDecodeMode = options.decode?.events ?? "safe";
 
   const main = <R>(
-    mainOptions: IpcMainOptions<RpcContract<Methods, Events, StreamMethods>, R>
+    mainOptions: IpcMainOptions<RpcContract<Methods, Events, StreamMethods>, R>,
   ): IpcMainHandle<RpcContract<Methods, Events, StreamMethods>> => {
-    const endpoint = createRpcEndpoint(
-      contract,
-      mainOptions.ipcMain,
-      mainOptions.handlers,
-      {
-        runtime: mainOptions.runtime,
-        channelPrefix,
-        diagnostics: mainOptions.diagnostics?.rpc,
-        streamHandlers: mainOptions.streamHandlers,
-      }
-    );
+    const endpoint = createRpcEndpoint(contract, mainOptions.ipcMain, mainOptions.handlers, {
+      runtime: mainOptions.runtime,
+      channelPrefix,
+      diagnostics: mainOptions.diagnostics?.rpc,
+      streamHandlers: mainOptions.streamHandlers,
+    });
 
     const publisher = createEventPublisher(contract, {
       getWindows: mainOptions.getWindows,
@@ -213,7 +207,7 @@ export function createIpcKit<
 
     function publish<E extends RpcContract<Methods, Events, StreamMethods>["events"][number]>(
       event: E,
-      payload: RpcEventPayload<E>
+      payload: RpcEventPayload<E>,
     ): Effect.Effect<void, never> {
       return publisher.publish(event, payload);
     }
@@ -254,11 +248,12 @@ export function createIpcKit<
     if (hasStreamMethods && !bridge.onStreamFrame) {
       throw new Error(
         "Contract defines stream methods but bridge.onStreamFrame is missing. " +
-        "Ensure the preload bridge exposes onStreamFrame."
+          "Ensure the preload bridge exposes onStreamFrame.",
       );
     }
 
-    let streamHandle: StreamRpcClientHandle<RpcContract<Methods, Events, StreamMethods>> | null = null;
+    let streamHandle: StreamRpcClientHandle<RpcContract<Methods, Events, StreamMethods>> | null =
+      null;
     if (hasStreamMethods && bridge.onStreamFrame) {
       streamHandle = createStreamRpcClient(contract, {
         invoke: bridge.invoke,
@@ -266,9 +261,8 @@ export function createIpcKit<
       });
     }
 
-    const emptyStreamClient = Object.create(null) as StreamRpcClient<
-      RpcContract<Methods, Events, StreamMethods>
-    >;
+    const emptyStreamClient: StreamRpcClient<RpcContract<Methods, Events, StreamMethods>> =
+      Object.create(null);
 
     return {
       client: createRpcClient(contract, {

@@ -5,10 +5,7 @@ import {
   event as eventRoot,
   rpc as rpcRoot,
 } from "electron-effect-rpc";
-import {
-  createEventPublisher,
-  createRpcEndpoint,
-} from "electron-effect-rpc/main";
+import { createEventPublisher, createRpcEndpoint } from "electron-effect-rpc/main";
 import {
   createEventSubscriber,
   createRpcClient,
@@ -19,13 +16,7 @@ import {
   exposeIpcBridge,
   exposeRpcBridge,
 } from "electron-effect-rpc/preload";
-import {
-  NoError,
-  defineContract,
-  event,
-  exitSchemaFor,
-  rpc,
-} from "electron-effect-rpc/contract";
+import { NoError, defineContract, event, exitSchemaFor, rpc } from "electron-effect-rpc/contract";
 import { createDeferred, createInvokeStub } from "electron-effect-rpc/testing";
 import type {
   IpcBridge,
@@ -74,4 +65,4 @@ type _SmokeTypes = {
   publisher: RpcEventPublisher<ReturnType<typeof defineContract>>;
 };
 
-void (0 as unknown as _SmokeTypes);
+type _Used = _SmokeTypes;

@@ -20,9 +20,9 @@ class AiError extends S.TaggedError<AiError>()("AiError", {
 
 export const StreamAiGeneration = streamRpc(
   "StreamAiGeneration",
-  S.Struct({ prompt: S.String }),   // request
-  S.Struct({ delta: S.String }),    // chunk (each frame)
-  AiError                           // typed error (optional)
+  S.Struct({ prompt: S.String }), // request
+  S.Struct({ delta: S.String }), // chunk (each frame)
+  AiError, // typed error (optional)
 );
 
 export const Ping = rpc("Ping", S.Struct({}), S.Struct({ ok: S.Boolean }));
@@ -59,11 +59,9 @@ const endpoint = createRpcEndpoint(
     runtime: Runtime.defaultRuntime,
     streamHandlers: {
       StreamAiGeneration: ({ prompt }) =>
-        generateTokens(prompt).pipe(
-          Stream.map((token) => ({ delta: token }))
-        ),
+        generateTokens(prompt).pipe(Stream.map((token) => ({ delta: token }))),
     },
-  }
+  },
 );
 
 endpoint.start();
@@ -108,25 +106,22 @@ const streamHandle = createStreamRpcClient(contract, {
 const allChunks = await Effect.runPromise(
   streamHandle.client.StreamAiGeneration({ prompt: "hello" }).pipe(
     Stream.runCollect,
-    Effect.map((chunk) => Array.from(chunk))
-  )
+    Effect.map((chunk) => Array.from(chunk)),
+  ),
 );
 
 // Process each chunk as it arrives
 await Effect.runPromise(
-  streamHandle.client.StreamAiGeneration({ prompt: "hello" }).pipe(
-    Stream.runForEach((chunk) =>
-      Effect.sync(() => console.log(chunk.delta))
-    )
-  )
+  streamHandle.client
+    .StreamAiGeneration({ prompt: "hello" })
+    .pipe(Stream.runForEach((chunk) => Effect.sync(() => console.log(chunk.delta)))),
 );
 
 // Take only the first 5 chunks (stream is cancelled automatically)
 await Effect.runPromise(
-  streamHandle.client.StreamAiGeneration({ prompt: "hello" }).pipe(
-    Stream.take(5),
-    Stream.runCollect
-  )
+  streamHandle.client
+    .StreamAiGeneration({ prompt: "hello" })
+    .pipe(Stream.take(5), Stream.runCollect),
 );
 
 // Clean up when done
@@ -142,11 +137,9 @@ value includes `streamClient` alongside `client` and `events`.
 const { client, events, streamClient, dispose } = ipc.renderer(window.api);
 
 await Effect.runPromise(
-  streamClient.StreamAiGeneration({ prompt: "hello" }).pipe(
-    Stream.runForEach((chunk) =>
-      Effect.sync(() => appendToUI(chunk.delta))
-    )
-  )
+  streamClient
+    .StreamAiGeneration({ prompt: "hello" })
+    .pipe(Stream.runForEach((chunk) => Effect.sync(() => appendToUI(chunk.delta)))),
 );
 
 // dispose() cleans up both event subscribers and stream client
@@ -162,20 +155,17 @@ appear in the stream's error channel. Transport defects appear as
 ```ts
 await Effect.runPromise(
   streamClient.StreamAiGeneration({ prompt: "hello" }).pipe(
-    Stream.runForEach((chunk) =>
-      Effect.sync(() => appendToUI(chunk.delta))
-    ),
-    Effect.catchTag("AiError", (e) =>
-      Effect.sync(() => showError(e.message))
-    ),
+    Stream.runForEach((chunk) => Effect.sync(() => appendToUI(chunk.delta))),
+    Effect.catchTag("AiError", (e) => Effect.sync(() => showError(e.message))),
     Effect.catchTag("RpcDefectError", (e) =>
-      Effect.sync(() => showError(`Transport error: ${e.code}`))
-    )
-  )
+      Effect.sync(() => showError(`Transport error: ${e.code}`)),
+    ),
+  ),
 );
 ```
 
 Stream-specific defect codes:
+
 - `stream_invoke_failed` — the handshake invoke call failed.
 - `stream_handshake_invalid` — main returned an unrecognized handshake response.
 - `stream_chunk_decode_failed` — a data frame's payload failed schema decoding.

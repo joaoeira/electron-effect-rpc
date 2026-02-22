@@ -14,6 +14,7 @@ import {
 import {
   extractStreamIdFromRaw,
   formatUnknown,
+  isRecord,
   parseRpcResponseEnvelope,
   parseStreamFrame,
   safelyCall,
@@ -27,7 +28,6 @@ import {
   type EventSubscribe,
   type EventSubscriber,
   type EventSubscriberOptions,
-  type OnStreamFrame,
   type RpcCaller,
   type RpcClient,
   type RpcClientOptions,
@@ -55,22 +55,25 @@ function requireSubscribe(options?: EventSubscriberOptions): EventSubscribe {
 }
 
 type MutableRpcClient<
-  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>
+  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>,
 > = {
   -readonly [Name in keyof RpcClient<C>]: RpcClient<C>[Name];
 };
 
-function rpcDefect(
-  code: RpcDefectError["code"],
-  message: string,
-  cause: unknown
-): RpcDefectError {
+function rpcDefect(code: RpcDefectError["code"], message: string, cause: unknown): RpcDefectError {
   return new RpcDefectError(code, message, cause);
+}
+
+function decodeNonEmptyError(schema: import("./contract.ts").ErrorSchema, data: unknown) {
+  if (isNoErrorSchema(schema)) {
+    throw new Error("unreachable: caller must check isNoErrorSchema first");
+  }
+  return S.decodeUnknownSync(schema)(data);
 }
 
 function decodeLegacyExit<M extends AnyMethod>(
   method: M,
-  raw: unknown
+  raw: unknown,
 ): Effect.Effect<RpcOutput<M>, RpcMethodError<M>> {
   return Effect.try({
     try: () => S.decodeUnknownSync(exitSchemaFor(method))(raw),
@@ -78,7 +81,7 @@ function decodeLegacyExit<M extends AnyMethod>(
       rpcDefect(
         "legacy_decode_failed",
         `RPC ${method.name} legacy response decoding failed: ${formatUnknown(cause)}`,
-        cause
+        cause,
       ),
   }).pipe(
     Effect.flatMap((exit) => {
@@ -88,7 +91,7 @@ function decodeLegacyExit<M extends AnyMethod>(
 
       const failureOption = Cause.failureOption(exit.cause);
       if (failureOption._tag === "Some") {
-        return Effect.fail(failureOption.value as RpcMethodError<M>);
+        return Effect.fail<RpcMethodError<M>>(failureOption.value);
       }
 
       const defectOption = Cause.dieOption(exit.cause);
@@ -99,23 +102,19 @@ function decodeLegacyExit<M extends AnyMethod>(
       }
 
       return Effect.fail(
-        rpcDefect(
-          "remote_defect",
-          "RPC call was interrupted or failed unexpectedly",
-          exit.cause
-        )
+        rpcDefect("remote_defect", "RPC call was interrupted or failed unexpectedly", exit.cause),
       );
-    })
+    }),
   );
 }
 
 export function createRpcClient<
   const Methods extends ReadonlyArray<AnyMethod>,
   const Events extends ReadonlyArray<AnyEvent>,
-  const StreamMethods extends ReadonlyArray<AnyStreamMethod> = readonly []
+  const StreamMethods extends ReadonlyArray<AnyStreamMethod> = readonly [],
 >(
   contract: RpcContract<Methods, Events, StreamMethods>,
-  options: RpcClientOptions
+  options: RpcClientOptions,
 ): RpcClient<RpcContract<Methods, Events, StreamMethods>> {
   const invoke = requireInvoke(options);
   const diagnostics = options?.diagnostics;
@@ -123,7 +122,7 @@ export function createRpcClient<
 
   const decodeEnvelope = <M extends Methods[number]>(
     method: M,
-    envelope: RpcResponseEnvelope
+    envelope: RpcResponseEnvelope,
   ): Effect.Effect<RpcOutput<M>, RpcMethodError<M>> => {
     switch (envelope.type) {
       case "success":
@@ -140,7 +139,7 @@ export function createRpcClient<
             return rpcDefect(
               "success_payload_decoding_failed",
               `RPC ${method.name} success payload decoding failed: ${formatUnknown(cause)}`,
-              cause
+              cause,
             );
           },
         });
@@ -151,14 +150,13 @@ export function createRpcClient<
             rpcDefect(
               "noerror_contract_violation",
               `RPC ${method.name} received a failure for a method that declares NoError`,
-              envelope.error
-            )
+              envelope.error,
+            ),
           );
         }
 
-        const errorSchema = method.err as S.Schema.AnyNoContext;
         return Effect.try({
-          try: () => S.decodeUnknownSync(errorSchema)(envelope.error.data),
+          try: () => decodeNonEmptyError(method.err, envelope.error.data),
           catch: (cause) => {
             safelyCall(diagnostics?.onDecodeFailure, {
               scope: "rpc-response",
@@ -170,25 +168,19 @@ export function createRpcClient<
             return rpcDefect(
               "failure_payload_decoding_failed",
               `RPC ${method.name} failure payload decoding failed: ${formatUnknown(cause)}`,
-              cause
+              cause,
             );
           },
-        }).pipe(
-          Effect.flatMap((decodedError) =>
-            Effect.fail(decodedError as RpcMethodError<M>)
-          )
-        );
+        }).pipe(Effect.flatMap((decodedError) => Effect.fail<RpcMethodError<M>>(decodedError)));
 
       case "defect":
-        return Effect.fail(
-          rpcDefect("remote_defect", envelope.message, envelope.cause)
-        );
+        return Effect.fail(rpcDefect("remote_defect", envelope.message, envelope.cause));
     }
   };
 
   const call = <M extends Methods[number]>(
     method: M,
-    input: RpcInput<M>
+    input: RpcInput<M>,
   ): Effect.Effect<RpcOutput<M>, RpcMethodError<M>> =>
     Effect.try({
       try: () => S.encodeSync(method.req)(input),
@@ -203,7 +195,7 @@ export function createRpcClient<
         return rpcDefect(
           "request_encoding_failed",
           `RPC ${method.name} request encoding failed: ${formatUnknown(cause)}`,
-          cause
+          cause,
         );
       },
     }).pipe(
@@ -220,10 +212,10 @@ export function createRpcClient<
             return rpcDefect(
               "invoke_failed",
               `RPC ${method.name} invoke failed: ${formatUnknown(cause)}`,
-              cause
+              cause,
             );
           },
-        })
+        }),
       ),
       Effect.flatMap((raw) => {
         const envelope = parseRpcResponseEnvelope(raw);
@@ -234,28 +226,25 @@ export function createRpcClient<
         if (decodeMode === "dual") {
           return decodeLegacyExit(method, raw).pipe(
             Effect.tapError((cause) => {
-              if (
-                cause instanceof RpcDefectError &&
-                cause.code === "legacy_decode_failed"
-              ) {
+              if (cause instanceof RpcDefectError && cause.code === "legacy_decode_failed") {
                 return Effect.sync(() =>
                   safelyCall(diagnostics?.onProtocolError, {
                     method: method.name,
                     response: raw,
                     cause,
-                  })
+                  }),
                 );
               }
 
               return Effect.void;
-            })
+            }),
           );
         }
 
         const cause = rpcDefect(
           "invalid_response_envelope",
           `RPC ${method.name} response was not a valid envelope.`,
-          raw
+          raw,
         );
         safelyCall(diagnostics?.onProtocolError, {
           method: method.name,
@@ -264,21 +253,15 @@ export function createRpcClient<
         });
 
         return Effect.fail(cause);
-      })
+      }),
     );
 
-  const client: MutableRpcClient<RpcContract<Methods, Events, StreamMethods>> =
-    Object.create(null);
+  const client: MutableRpcClient<RpcContract<Methods, Events, StreamMethods>> = Object.create(null);
   const clientRecord: Record<string, unknown> = client;
 
   for (const method of contract.methods) {
-    const caller: RpcCaller<typeof method> = (
-      ...args: [RpcInput<typeof method>?]
-    ) => {
-      const payload =
-        args.length === 0
-          ? ({} as RpcInput<typeof method>)
-          : (args[0] as RpcInput<typeof method>);
+    const caller: RpcCaller<typeof method> = (...args: [RpcInput<typeof method>?]) => {
+      const payload: RpcInput<typeof method> = args.length === 0 ? {} : args[0]!;
       return call(method, payload);
     };
 
@@ -293,7 +276,7 @@ function reportDecodeFailure(
   eventName: string,
   payload: unknown,
   cause: unknown,
-  options?: EventSubscriberOptions
+  options?: EventSubscriberOptions,
 ): void {
   safelyCall(options?.diagnostics?.onDecodeFailure, {
     scope: "event-payload",
@@ -310,10 +293,10 @@ function reportDecodeFailure(
 export function createEventSubscriber<
   const Methods extends ReadonlyArray<AnyMethod>,
   const Events extends ReadonlyArray<AnyEvent>,
-  const StreamMethods extends ReadonlyArray<AnyStreamMethod> = readonly []
+  const StreamMethods extends ReadonlyArray<AnyStreamMethod> = readonly [],
 >(
   contract: RpcContract<Methods, Events, StreamMethods>,
-  options: EventSubscriberOptions
+  options: EventSubscriberOptions,
 ): EventSubscriber<RpcContract<Methods, Events, StreamMethods>> {
   const subscribe = requireSubscribe(options);
   const mode = options?.decodeMode ?? "safe";
@@ -337,7 +320,7 @@ export function createEventSubscriber<
 
   const subscribeEvent = <E extends Events[number]>(
     event: E,
-    handler: (payload: RpcEventPayload<E>) => void
+    handler: (payload: RpcEventPayload<E>) => void,
   ) => {
     const decoder = S.decodeUnknownSync(event.payload);
     const unsubscribe = subscribe(event.name, (payload) => {
@@ -355,10 +338,7 @@ export function createEventSubscriber<
     return registerUnsubscribe(unsubscribe);
   };
 
-  const subscribeByName = (
-    name: string,
-    handler: (payload: unknown) => void
-  ) => {
+  const subscribeByName = (name: string, handler: (payload: unknown) => void) => {
     const event = eventMap.get(name);
     if (!event) {
       throw new Error(`Unknown event: ${name}`);
@@ -406,10 +386,9 @@ export function createEventSubscriber<
 }
 
 function isStreamStartedResponse(value: unknown): boolean {
-  if (typeof value !== "object" || value === null) return false;
-  const rec = value as Record<string, unknown>;
-  if (rec.type === "success" && typeof rec.data === "object" && rec.data !== null) {
-    return (rec.data as Record<string, unknown>).type === "stream_started";
+  if (!isRecord(value)) return false;
+  if (value.type === "success" && isRecord(value.data)) {
+    return value.data.type === "stream_started";
   }
   return false;
 }
@@ -417,10 +396,10 @@ function isStreamStartedResponse(value: unknown): boolean {
 export function createStreamRpcClient<
   const Methods extends ReadonlyArray<AnyMethod>,
   const Events extends ReadonlyArray<AnyEvent>,
-  const StreamMethods extends ReadonlyArray<AnyStreamMethod>
+  const StreamMethods extends ReadonlyArray<AnyStreamMethod>,
 >(
   contract: RpcContract<Methods, Events, StreamMethods>,
-  options: StreamRpcClientOptions
+  options: StreamRpcClientOptions,
 ): StreamRpcClientHandle<RpcContract<Methods, Events, StreamMethods>> {
   const invoke = options.invoke;
   const onStreamFrame = options.onStreamFrame;
@@ -481,8 +460,9 @@ export function createStreamRpcClient<
   const streamMethods = contract.streamMethods ?? [];
 
   type MutableStreamRpcClient = {
-    -readonly [Name in keyof StreamRpcClient<RpcContract<Methods, Events, StreamMethods>>]:
-      StreamRpcClient<RpcContract<Methods, Events, StreamMethods>>[Name];
+    -readonly [Name in keyof StreamRpcClient<
+      RpcContract<Methods, Events, StreamMethods>
+    >]: StreamRpcClient<RpcContract<Methods, Events, StreamMethods>>[Name];
   };
 
   const client: MutableStreamRpcClient = Object.create(null);
@@ -491,17 +471,10 @@ export function createStreamRpcClient<
   for (const method of streamMethods) {
     const decodeChunk = S.decodeUnknownSync(method.chunk);
     const encodeInput = S.encodeSync(method.req);
-    const decodeTypedError = isNoErrorSchema(method.err)
-      ? null
-      : S.decodeUnknownSync(method.err);
+    const decodeTypedError = isNoErrorSchema(method.err) ? null : S.decodeUnknownSync(method.err);
 
-    const caller: StreamRpcCaller<typeof method> = (
-      ...args: [StreamInput<typeof method>?]
-    ) => {
-      const payload =
-        args.length === 0
-          ? ({} as StreamInput<typeof method>)
-          : (args[0] as StreamInput<typeof method>);
+    const caller: StreamRpcCaller<typeof method> = (...args: [StreamInput<typeof method>?]) => {
+      const payload: StreamInput<typeof method> = args.length === 0 ? {} : args[0]!;
 
       return Stream.asyncPush<StreamChunk<typeof method>, StreamMethodError<typeof method>>(
         (emit) =>
@@ -515,18 +488,19 @@ export function createStreamRpcClient<
                 try {
                   decoded = decodeChunk(rawPayload);
                 } catch (cause) {
-                  safelyCall(diagnostics?.onDecodeFailure, {
-                    scope: "stream-chunk" as const,
+                  const context: import("./types.ts").DecodeFailureContext = {
+                    scope: "stream-chunk",
                     name: method.name,
                     payload: rawPayload,
                     cause,
-                  });
+                  };
+                  safelyCall(diagnostics?.onDecodeFailure, context);
                   emit.fail(
                     rpcDefect(
                       "stream_chunk_decode_failed",
                       `Stream ${method.name} chunk decode failed: ${formatUnknown(cause)}`,
-                      cause
-                    )
+                      cause,
+                    ),
                   );
                   return;
                 }
@@ -539,35 +513,33 @@ export function createStreamRpcClient<
                     rpcDefect(
                       "stream_error_decode_failed",
                       `Stream ${method.name} received typed error but declares NoError`,
-                      err
-                    )
+                      err,
+                    ),
                   );
                   return;
                 }
 
-                let decoded: unknown;
                 try {
-                  decoded = decodeTypedError(err.data);
+                  const decoded = decodeNonEmptyError(method.err, err.data);
+                  emit.fail(decoded);
                 } catch (cause) {
-                  safelyCall(diagnostics?.onDecodeFailure, {
-                    scope: "stream-error" as const,
+                  const errContext: import("./types.ts").DecodeFailureContext = {
+                    scope: "stream-error",
                     name: method.name,
                     payload: err,
                     cause,
-                  });
+                  };
+                  safelyCall(diagnostics?.onDecodeFailure, errContext);
                   emit.fail(
                     rpcDefect(
                       "stream_error_decode_failed",
                       `Stream ${method.name} error decode failed: ${formatUnknown(cause)}`,
-                      cause
-                    )
+                      cause,
+                    ),
                   );
-                  return;
                 }
-                emit.fail(decoded as StreamMethodError<typeof method>);
               },
-              defect: (message) =>
-                emit.fail(rpcDefect("remote_defect", message, undefined)),
+              defect: (message) => emit.fail(rpcDefect("remote_defect", message, undefined)),
             });
 
             // 2. Register cleanup finalizer
@@ -577,10 +549,10 @@ export function createStreamRpcClient<
               }).pipe(
                 Effect.andThen(
                   Effect.tryPromise(() => invoke(`stream-cancel`, { streamId })).pipe(
-                    Effect.ignore
-                  )
-                )
-              )
+                    Effect.ignore,
+                  ),
+                ),
+              ),
             );
 
             // 3. Encode input
@@ -590,7 +562,7 @@ export function createStreamRpcClient<
                 rpcDefect(
                   "request_encoding_failed",
                   `Stream ${method.name} request encoding failed: ${formatUnknown(cause)}`,
-                  cause
+                  cause,
                 ),
             });
 
@@ -605,7 +577,7 @@ export function createStreamRpcClient<
                 rpcDefect(
                   "stream_invoke_failed",
                   `Stream ${method.name} invoke failed: ${formatUnknown(cause)}`,
-                  cause
+                  cause,
                 ),
             });
 
@@ -613,7 +585,7 @@ export function createStreamRpcClient<
             const envelope = parseRpcResponseEnvelope(response);
             if (envelope?.type === "defect") {
               return yield* Effect.fail(
-                rpcDefect("remote_defect", envelope.message, envelope.cause)
+                rpcDefect("remote_defect", envelope.message, envelope.cause),
               );
             }
 
@@ -622,12 +594,12 @@ export function createStreamRpcClient<
                 rpcDefect(
                   "stream_handshake_invalid",
                   `Stream ${method.name} unexpected handshake response`,
-                  response
-                )
+                  response,
+                ),
               );
             }
           }),
-        { bufferSize: 16, strategy: "dropping" }
+        { bufferSize: 16, strategy: "dropping" },
       );
     };
 
@@ -644,7 +616,7 @@ export function createStreamRpcClient<
   }
 
   return {
-    client: client as StreamRpcClient<RpcContract<Methods, Events, StreamMethods>>,
+    client,
     dispose,
   };
 }

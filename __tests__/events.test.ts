@@ -3,6 +3,7 @@ import * as S from "@effect/schema/Schema";
 import { Effect } from "effect";
 import { defineContract, event } from "../src/contract.ts";
 import { createEventPublisher } from "../src/main.ts";
+import { isRecord } from "../src/protocol.ts";
 import { createEventSubscriber } from "../src/renderer.ts";
 
 const waitFor = async (predicate: () => boolean, timeoutMs = 500) => {
@@ -25,14 +26,10 @@ describe("createEventSubscriber", () => {
   });
 
   it("when event subscriber is created without subscribe, then creation throws", () => {
-    const createWithoutOptions = createEventSubscriber as unknown as (
-      c: typeof contract,
-      options?: unknown
-    ) => unknown;
-
-    expect(() => createWithoutOptions(contract)).toThrow(
-      /EventSubscriberOptions.subscribe is required/
-    );
+    expect(() => {
+      // @ts-expect-error intentionally omitting required options to test error path
+      createEventSubscriber(contract);
+    }).toThrow(/EventSubscriberOptions.subscribe is required/);
   });
 
   it("when subscriber uses default safe mode and payload decoding fails, then handler is skipped and diagnostics are reported", () => {
@@ -84,9 +81,9 @@ describe("createEventSubscriber", () => {
       subscribe: () => () => {},
     });
 
-    expect(() =>
-      subscriber.subscribeByName("UnknownEvent", () => {})
-    ).toThrow(/Unknown event: UnknownEvent/);
+    expect(() => subscriber.subscribeByName("UnknownEvent", () => {})).toThrow(
+      /Unknown event: UnknownEvent/,
+    );
   });
 
   it("when subscribeByName receives a valid payload, then it decodes and invokes the handler", () => {
@@ -261,7 +258,7 @@ describe("createEventPublisher", () => {
       createEventPublisher(contract, {
         getWindows: () => [],
         maxQueueSize: 0,
-      })
+      }),
     ).toThrow(/positive finite number/);
   });
 
@@ -270,7 +267,7 @@ describe("createEventPublisher", () => {
       createEventPublisher(contract, {
         getWindows: () => [],
         maxQueueSize: -2,
-      })
+      }),
     ).toThrow(/positive finite number/);
   });
 
@@ -279,14 +276,14 @@ describe("createEventPublisher", () => {
       createEventPublisher(contract, {
         getWindows: () => [],
         maxQueueSize: Number.POSITIVE_INFINITY,
-      })
+      }),
     ).toThrow(/positive finite number/);
 
     expect(() =>
       createEventPublisher(contract, {
         getWindows: () => [],
         maxQueueSize: Number.NaN,
-      })
+      }),
     ).toThrow(/positive finite number/);
   });
 
@@ -340,11 +337,7 @@ describe("createEventPublisher", () => {
     await Effect.runPromise(publisher.publish(Progress, { value: 3 }));
 
     await waitFor(() => sent.length === 3);
-    expect(sent.map((entry) => entry.payload)).toEqual([
-      { value: 1 },
-      { value: 2 },
-      { value: 3 },
-    ]);
+    expect(sent.map((entry) => entry.payload)).toEqual([{ value: 1 }, { value: 2 }, { value: 3 }]);
   });
 
   it("when queue reaches maxQueueSize, then oldest queued events are dropped", async () => {
@@ -380,10 +373,7 @@ describe("createEventPublisher", () => {
     publisher.start();
     await waitFor(() => sent.length === 2);
 
-    expect(sent.map((entry) => entry.payload)).toEqual([
-      { value: 2 },
-      { value: 3 },
-    ]);
+    expect(sent.map((entry) => entry.payload)).toEqual([{ value: 2 }, { value: 3 }]);
   });
 
   it("when renderer window is unavailable during dispatch, then event is dropped and drop diagnostics are recorded", async () => {
@@ -417,12 +407,14 @@ describe("createEventPublisher", () => {
   it("when target window is destroyed, then publisher records the event as dropped", async () => {
     const dropped: unknown[] = [];
     const publisher = createEventPublisher(contract, {
-      getWindows: () => [{
-        isDestroyed: () => true,
-        webContents: {
-          send: () => {},
+      getWindows: () => [
+        {
+          isDestroyed: () => true,
+          webContents: {
+            send: () => {},
+          },
         },
-      }],
+      ],
       diagnostics: {
         onDroppedEvent: (context) => {
           dropped.push(context);
@@ -471,9 +463,8 @@ describe("createEventPublisher", () => {
     });
 
     publisher.start();
-    await Effect.runPromise(
-      publisher.publish(Progress, { value: "bad-number" } as never)
-    );
+    // @ts-expect-error intentionally wrong payload type to test encoding failure
+    await Effect.runPromise(publisher.publish(Progress, { value: "bad-number" }));
     await waitFor(() => publisher.stats().dropped === 1);
 
     expect(sent).toEqual([]);
@@ -661,17 +652,21 @@ describe("createEventPublisher", () => {
     const dispatchFailures: Array<Record<string, unknown>> = [];
 
     const publisher = createEventPublisher(contract, {
-      getWindows: () => [{
-        isDestroyed: () => false,
-        webContents: {
-          send: () => {
-            throw new Error("send-failed");
+      getWindows: () => [
+        {
+          isDestroyed: () => false,
+          webContents: {
+            send: () => {
+              throw new Error("send-failed");
+            },
           },
         },
-      }],
+      ],
       diagnostics: {
         onDispatchFailure: (context) => {
-          dispatchFailures.push(context as unknown as Record<string, unknown>);
+          if (isRecord(context)) {
+            dispatchFailures.push(context);
+          }
         },
       },
     });
@@ -694,7 +689,9 @@ describe("createEventPublisher", () => {
       getWindows: () => [],
       diagnostics: {
         onDroppedEvent: (context) => {
-          dropped.push(context as unknown as Record<string, unknown>);
+          if (isRecord(context)) {
+            dropped.push(context);
+          }
         },
       },
     });
@@ -725,7 +722,7 @@ describe("createEventPublisher", () => {
     publisher.start();
 
     await expect(
-      Effect.runPromise(publisher.publish(Progress, { value: 1 }))
+      Effect.runPromise(publisher.publish(Progress, { value: 1 })),
     ).resolves.toBeUndefined();
     await waitFor(() => publisher.stats().dropped === 1);
     expect(publisher.stats()).toEqual({ queued: 0, dropped: 1 });
@@ -778,17 +775,19 @@ describe("createEventPublisher", () => {
     let sendAttempt = 0;
 
     const publisher = createEventPublisher(contract, {
-      getWindows: () => [{
-        isDestroyed: () => false,
-        webContents: {
-          send: () => {
-            sendAttempt += 1;
-            if (sendAttempt <= 2) {
-              throw new Error("dispatch-fail");
-            }
+      getWindows: () => [
+        {
+          isDestroyed: () => false,
+          webContents: {
+            send: () => {
+              sendAttempt += 1;
+              if (sendAttempt <= 2) {
+                throw new Error("dispatch-fail");
+              }
+            },
           },
         },
-      }],
+      ],
       maxQueueSize: 2,
     });
 
@@ -1020,9 +1019,8 @@ describe("createEventPublisher", () => {
     });
 
     publisher.start();
-    await Effect.runPromise(
-      publisher.publish(Progress, { value: "bad-number" } as never)
-    );
+    // @ts-expect-error intentionally wrong payload type to test encoding failure
+    await Effect.runPromise(publisher.publish(Progress, { value: "bad-number" }));
     await waitFor(() => publisher.stats().dropped === 1);
 
     expect(sent).toEqual([]);

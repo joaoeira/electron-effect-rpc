@@ -31,14 +31,8 @@ describe("defineContract", () => {
       events: [FirstEvent, SecondEvent] as const,
     });
 
-    expect(contract.methods.map((method) => method.name)).toEqual([
-      "First",
-      "Second",
-    ]);
-    expect(contract.events.map((ev) => ev.name)).toEqual([
-      "FirstEvent",
-      "SecondEvent",
-    ]);
+    expect(contract.methods.map((method) => method.name)).toEqual(["First", "Second"]);
+    expect(contract.events.map((ev) => ev.name)).toEqual(["FirstEvent", "SecondEvent"]);
   });
 
   it("when entries share shape but have distinct names, then defineContract accepts them", () => {
@@ -57,25 +51,25 @@ describe("defineContract", () => {
   });
 
   it("when two methods share the same name, then defineContract throws", () => {
-    expect(() =>
-      defineContract({ methods: [FooMethod, FooMethod], events: [] })
-    ).toThrow(/Duplicate RPC method name/);
+    expect(() => defineContract({ methods: [FooMethod, FooMethod], events: [] })).toThrow(
+      /Duplicate RPC method name/,
+    );
   });
 
   it("when two events share the same name, then defineContract throws", () => {
-    expect(() =>
-      defineContract({ methods: [FooMethod], events: [BarEvent, BarEvent] })
-    ).toThrow(/Duplicate RPC event name/);
+    expect(() => defineContract({ methods: [FooMethod], events: [BarEvent, BarEvent] })).toThrow(
+      /Duplicate RPC event name/,
+    );
   });
 
   it("when methods or events are not arrays, then defineContract throws", () => {
     // @ts-expect-error runtime validation for invalid shape
     expect(() => defineContract({ methods: "nope", events: [] })).toThrow(
-      /methods must be an array/
+      /methods must be an array/,
     );
     // @ts-expect-error runtime validation for invalid shape
     expect(() => defineContract({ methods: [], events: "nope" })).toThrow(
-      /events must be an array/
+      /events must be an array/,
     );
   });
 });

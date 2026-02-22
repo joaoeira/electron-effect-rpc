@@ -44,11 +44,7 @@ export type {
 } from "./contract.ts";
 
 export type Implementations<
-  C extends RpcContract<
-    readonly AnyMethod[],
-    readonly AnyEvent[],
-    readonly AnyStreamMethod[]
-  >,
+  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>,
   R = never,
 > = {
   readonly [Name in C["methods"][number]["name"]]: (
@@ -61,11 +57,7 @@ export type Implementations<
 };
 
 export type StreamImplementations<
-  C extends RpcContract<
-    readonly AnyMethod[],
-    readonly AnyEvent[],
-    readonly AnyStreamMethod[]
-  >,
+  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>,
   R = never,
 > = {
   readonly [Name in C["streamMethods"][number]["name"]]: (
@@ -83,11 +75,7 @@ export type WebContentsLike = {
   readonly send: (channel: string, payload: unknown) => void;
 };
 
-type IsEmptyObject<T> = T extends object
-  ? keyof T extends never
-    ? true
-    : false
-  : false;
+type IsEmptyObject<T> = T extends object ? (keyof T extends never ? true : false) : false;
 
 export type RpcDefectCode =
   | "request_encoding_failed"
@@ -124,34 +112,20 @@ export type RpcCaller<M extends AnyMethod> =
     : (input: RpcInput<M>) => Effect.Effect<RpcOutput<M>, RpcMethodError<M>>;
 
 export type RpcClient<
-  C extends RpcContract<
-    readonly AnyMethod[],
-    readonly AnyEvent[],
-    readonly AnyStreamMethod[]
-  >,
+  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>,
 > = {
-  readonly [Name in C["methods"][number]["name"]]: RpcCaller<
-    ExtractMethod<C["methods"], Name>
-  >;
+  readonly [Name in C["methods"][number]["name"]]: RpcCaller<ExtractMethod<C["methods"], Name>>;
 };
 
-export type StreamMethodError<M extends AnyStreamMethod> =
-  | StreamError<M>
-  | RpcDefectError;
+export type StreamMethodError<M extends AnyStreamMethod> = StreamError<M> | RpcDefectError;
 
 export type StreamRpcCaller<M extends AnyStreamMethod> =
   IsEmptyObject<StreamInput<M>> extends true
     ? () => Stream.Stream<StreamChunk<M>, StreamMethodError<M>>
-    : (
-        input: StreamInput<M>,
-      ) => Stream.Stream<StreamChunk<M>, StreamMethodError<M>>;
+    : (input: StreamInput<M>) => Stream.Stream<StreamChunk<M>, StreamMethodError<M>>;
 
 export type StreamRpcClient<
-  C extends RpcContract<
-    readonly AnyMethod[],
-    readonly AnyEvent[],
-    readonly AnyStreamMethod[]
-  >,
+  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>,
 > = {
   readonly [Name in C["streamMethods"][number]["name"]]: StreamRpcCaller<
     ExtractStreamMethod<C["streamMethods"], Name>
@@ -245,11 +219,8 @@ export interface RpcEndpoint {
 }
 
 export type RpcEndpointOptions<
-  C extends RpcContract<
-    readonly AnyMethod[],
-    readonly AnyEvent[],
-    readonly AnyStreamMethod[]
-  > = RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly []>,
+  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]> =
+    RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly []>,
   R = never,
 > = {
   readonly channelPrefix?: ChannelPrefix;
@@ -279,11 +250,7 @@ export type EventPublisherOptions = {
 };
 
 export interface RpcEventPublisher<
-  C extends RpcContract<
-    readonly AnyMethod[],
-    readonly AnyEvent[],
-    readonly AnyStreamMethod[]
-  >,
+  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>,
 > {
   readonly publish: <E extends C["events"][number]>(
     event: E,
@@ -301,10 +268,7 @@ export interface RpcEventPublisher<
 
 export type EventDecodeMode = "safe" | "strict";
 
-export type EventSubscribe = (
-  name: string,
-  handler: (payload: unknown) => void,
-) => () => void;
+export type EventSubscribe = (name: string, handler: (payload: unknown) => void) => () => void;
 
 export type EventSubscriberDiagnostics = {
   readonly onDecodeFailure?: (context: DecodeFailureContext) => void;
@@ -317,20 +281,13 @@ export type EventSubscriberOptions = {
 };
 
 export interface EventSubscriber<
-  C extends RpcContract<
-    readonly AnyMethod[],
-    readonly AnyEvent[],
-    readonly AnyStreamMethod[]
-  >,
+  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>,
 > {
   readonly subscribe: <E extends C["events"][number]>(
     event: E,
     handler: (payload: RpcEventPayload<E>) => void,
   ) => () => void;
-  readonly subscribeByName: (
-    name: string,
-    handler: (payload: unknown) => void,
-  ) => () => void;
+  readonly subscribeByName: (name: string, handler: (payload: unknown) => void) => () => void;
   readonly dispose: () => void;
 }
 
@@ -343,20 +300,10 @@ export type StreamRpcClientOptions = {
 };
 
 export interface StreamRpcClientHandle<
-  C extends RpcContract<
-    readonly AnyMethod[],
-    readonly AnyEvent[],
-    readonly AnyStreamMethod[]
-  >,
+  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>,
 > {
   readonly client: StreamRpcClient<C>;
   readonly dispose: () => void;
 }
 
-export type {
-  IpcBridge,
-  IpcBridgeGlobal,
-  IpcKit,
-  IpcKitOptions,
-  IpcMainHandle,
-} from "./kit.ts";
+export type { IpcBridge, IpcBridgeGlobal, IpcKit, IpcKitOptions, IpcMainHandle } from "./kit.ts";

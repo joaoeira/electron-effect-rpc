@@ -15,7 +15,7 @@ export const createInvokeStub = (impl: RpcInvoke): InvokeStub => {
       invocations.push({ method, payload });
       return impl(method, payload);
     },
-    { invocations }
+    { invocations },
   );
 
   return wrapped;
