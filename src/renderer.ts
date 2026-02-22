@@ -1,16 +1,21 @@
 import * as S from "@effect/schema/Schema";
-import { Cause, Effect, Exit } from "effect";
+import { Cause, Effect, Exit, Stream } from "effect";
 import {
   exitSchemaFor,
   isNoErrorSchema,
+  type AnyStreamMethod,
   type RpcContract,
   type RpcEventPayload,
   type RpcInput,
   type RpcOutput,
+  type StreamChunk,
+  type StreamInput,
 } from "./contract.ts";
 import {
+  extractStreamIdFromRaw,
   formatUnknown,
   parseRpcResponseEnvelope,
+  parseStreamFrame,
   safelyCall,
   type RpcResponseEnvelope,
 } from "./protocol.ts";
@@ -22,11 +27,17 @@ import {
   type EventSubscribe,
   type EventSubscriber,
   type EventSubscriberOptions,
+  type OnStreamFrame,
   type RpcCaller,
   type RpcClient,
   type RpcClientOptions,
   type RpcInvoke,
   type RpcMethodError,
+  type StreamMethodError,
+  type StreamRpcCaller,
+  type StreamRpcClient,
+  type StreamRpcClientHandle,
+  type StreamRpcClientOptions,
 } from "./types.ts";
 
 function requireInvoke(options?: RpcClientOptions): RpcInvoke {
@@ -44,7 +55,7 @@ function requireSubscribe(options?: EventSubscriberOptions): EventSubscribe {
 }
 
 type MutableRpcClient<
-  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[]>
+  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>
 > = {
   -readonly [Name in keyof RpcClient<C>]: RpcClient<C>[Name];
 };
@@ -100,11 +111,12 @@ function decodeLegacyExit<M extends AnyMethod>(
 
 export function createRpcClient<
   const Methods extends ReadonlyArray<AnyMethod>,
-  const Events extends ReadonlyArray<AnyEvent>
+  const Events extends ReadonlyArray<AnyEvent>,
+  const StreamMethods extends ReadonlyArray<AnyStreamMethod> = readonly []
 >(
-  contract: RpcContract<Methods, Events>,
+  contract: RpcContract<Methods, Events, StreamMethods>,
   options: RpcClientOptions
-): RpcClient<RpcContract<Methods, Events>> {
+): RpcClient<RpcContract<Methods, Events, StreamMethods>> {
   const invoke = requireInvoke(options);
   const diagnostics = options?.diagnostics;
   const decodeMode = options?.rpcDecodeMode ?? "envelope";
@@ -255,7 +267,7 @@ export function createRpcClient<
       })
     );
 
-  const client: MutableRpcClient<RpcContract<Methods, Events>> =
+  const client: MutableRpcClient<RpcContract<Methods, Events, StreamMethods>> =
     Object.create(null);
   const clientRecord: Record<string, unknown> = client;
 
@@ -297,11 +309,12 @@ function reportDecodeFailure(
 
 export function createEventSubscriber<
   const Methods extends ReadonlyArray<AnyMethod>,
-  const Events extends ReadonlyArray<AnyEvent>
+  const Events extends ReadonlyArray<AnyEvent>,
+  const StreamMethods extends ReadonlyArray<AnyStreamMethod> = readonly []
 >(
-  contract: RpcContract<Methods, Events>,
+  contract: RpcContract<Methods, Events, StreamMethods>,
   options: EventSubscriberOptions
-): EventSubscriber<RpcContract<Methods, Events>> {
+): EventSubscriber<RpcContract<Methods, Events, StreamMethods>> {
   const subscribe = requireSubscribe(options);
   const mode = options?.decodeMode ?? "safe";
 
@@ -388,6 +401,250 @@ export function createEventSubscriber<
   return {
     subscribe: subscribeEvent,
     subscribeByName,
+    dispose,
+  };
+}
+
+function isStreamStartedResponse(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const rec = value as Record<string, unknown>;
+  if (rec.type === "success" && typeof rec.data === "object" && rec.data !== null) {
+    return (rec.data as Record<string, unknown>).type === "stream_started";
+  }
+  return false;
+}
+
+export function createStreamRpcClient<
+  const Methods extends ReadonlyArray<AnyMethod>,
+  const Events extends ReadonlyArray<AnyEvent>,
+  const StreamMethods extends ReadonlyArray<AnyStreamMethod>
+>(
+  contract: RpcContract<Methods, Events, StreamMethods>,
+  options: StreamRpcClientOptions
+): StreamRpcClientHandle<RpcContract<Methods, Events, StreamMethods>> {
+  const invoke = options.invoke;
+  const onStreamFrame = options.onStreamFrame;
+  const diagnostics = options.diagnostics;
+
+  type FrameHandler = {
+    data: (payload: unknown) => void;
+    end: () => void;
+    error: (error: { tag: string; data: unknown }) => void;
+    defect: (message: string) => void;
+  };
+
+  const frameDispatcher = new Map<string, FrameHandler>();
+
+  // Set up central frame listener
+  const centralCleanup = onStreamFrame((raw: unknown) => {
+    const frame = parseStreamFrame(raw);
+    if (!frame) {
+      // Best-effort: extract streamId from malformed frame to fail the active stream
+      const rawStreamId = extractStreamIdFromRaw(raw);
+      if (rawStreamId) {
+        const handler = frameDispatcher.get(rawStreamId);
+        if (handler) {
+          handler.defect("Malformed stream frame received");
+          frameDispatcher.delete(rawStreamId);
+        }
+      }
+      safelyCall(diagnostics?.onProtocolError, {
+        method: "stream-frame",
+        response: raw,
+        cause: null,
+      });
+      return;
+    }
+
+    const handler = frameDispatcher.get(frame.streamId);
+    if (!handler) return; // stale frame for completed/cancelled stream
+
+    switch (frame.type) {
+      case "data":
+        handler.data(frame.payload);
+        break;
+      case "end":
+        handler.end();
+        frameDispatcher.delete(frame.streamId);
+        break;
+      case "error":
+        handler.error(frame.error);
+        frameDispatcher.delete(frame.streamId);
+        break;
+      case "defect":
+        handler.defect(frame.message);
+        frameDispatcher.delete(frame.streamId);
+        break;
+    }
+  });
+
+  const streamMethods = contract.streamMethods ?? [];
+
+  type MutableStreamRpcClient = {
+    -readonly [Name in keyof StreamRpcClient<RpcContract<Methods, Events, StreamMethods>>]:
+      StreamRpcClient<RpcContract<Methods, Events, StreamMethods>>[Name];
+  };
+
+  const client: MutableStreamRpcClient = Object.create(null);
+  const clientRecord: Record<string, unknown> = client;
+
+  for (const method of streamMethods) {
+    const decodeChunk = S.decodeUnknownSync(method.chunk);
+    const encodeInput = S.encodeSync(method.req);
+    const decodeTypedError = isNoErrorSchema(method.err)
+      ? null
+      : S.decodeUnknownSync(method.err);
+
+    const caller: StreamRpcCaller<typeof method> = (
+      ...args: [StreamInput<typeof method>?]
+    ) => {
+      const payload =
+        args.length === 0
+          ? ({} as StreamInput<typeof method>)
+          : (args[0] as StreamInput<typeof method>);
+
+      return Stream.asyncPush<StreamChunk<typeof method>, StreamMethodError<typeof method>>(
+        (emit) =>
+          Effect.gen(function* () {
+            const streamId = crypto.randomUUID();
+
+            // 1. Register in dispatch map BEFORE calling invoke
+            frameDispatcher.set(streamId, {
+              data: (rawPayload) => {
+                let decoded: StreamChunk<typeof method>;
+                try {
+                  decoded = decodeChunk(rawPayload);
+                } catch (cause) {
+                  safelyCall(diagnostics?.onDecodeFailure, {
+                    scope: "stream-chunk" as const,
+                    name: method.name,
+                    payload: rawPayload,
+                    cause,
+                  });
+                  emit.fail(
+                    rpcDefect(
+                      "stream_chunk_decode_failed",
+                      `Stream ${method.name} chunk decode failed: ${formatUnknown(cause)}`,
+                      cause
+                    )
+                  );
+                  return;
+                }
+                emit.single(decoded);
+              },
+              end: () => emit.end(),
+              error: (err) => {
+                if (!decodeTypedError) {
+                  emit.fail(
+                    rpcDefect(
+                      "stream_error_decode_failed",
+                      `Stream ${method.name} received typed error but declares NoError`,
+                      err
+                    )
+                  );
+                  return;
+                }
+
+                let decoded: unknown;
+                try {
+                  decoded = decodeTypedError(err.data);
+                } catch (cause) {
+                  safelyCall(diagnostics?.onDecodeFailure, {
+                    scope: "stream-error" as const,
+                    name: method.name,
+                    payload: err,
+                    cause,
+                  });
+                  emit.fail(
+                    rpcDefect(
+                      "stream_error_decode_failed",
+                      `Stream ${method.name} error decode failed: ${formatUnknown(cause)}`,
+                      cause
+                    )
+                  );
+                  return;
+                }
+                emit.fail(decoded as StreamMethodError<typeof method>);
+              },
+              defect: (message) =>
+                emit.fail(rpcDefect("remote_defect", message, undefined)),
+            });
+
+            // 2. Register cleanup finalizer
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() => {
+                frameDispatcher.delete(streamId);
+              }).pipe(
+                Effect.andThen(
+                  Effect.tryPromise(() => invoke(`stream-cancel`, { streamId })).pipe(
+                    Effect.ignore
+                  )
+                )
+              )
+            );
+
+            // 3. Encode input
+            const encodedInput = yield* Effect.try({
+              try: () => encodeInput(payload),
+              catch: (cause) =>
+                rpcDefect(
+                  "request_encoding_failed",
+                  `Stream ${method.name} request encoding failed: ${formatUnknown(cause)}`,
+                  cause
+                ),
+            });
+
+            // 4. Initiate the stream on main
+            const response = yield* Effect.tryPromise({
+              try: () =>
+                invoke(`stream/${method.name}`, {
+                  data: encodedInput,
+                  streamId,
+                }),
+              catch: (cause) =>
+                rpcDefect(
+                  "stream_invoke_failed",
+                  `Stream ${method.name} invoke failed: ${formatUnknown(cause)}`,
+                  cause
+                ),
+            });
+
+            // 5. Validate handshake response
+            const envelope = parseRpcResponseEnvelope(response);
+            if (envelope?.type === "defect") {
+              return yield* Effect.fail(
+                rpcDefect("remote_defect", envelope.message, envelope.cause)
+              );
+            }
+
+            if (!isStreamStartedResponse(response)) {
+              return yield* Effect.fail(
+                rpcDefect(
+                  "stream_handshake_invalid",
+                  `Stream ${method.name} unexpected handshake response`,
+                  response
+                )
+              );
+            }
+          }),
+        { bufferSize: 16, strategy: "dropping" }
+      );
+    };
+
+    clientRecord[method.name] = caller;
+  }
+
+  function dispose(): void {
+    // Fail all active streams so consumers don't hang
+    for (const [streamId, handler] of frameDispatcher) {
+      handler.defect("Stream client disposed");
+      frameDispatcher.delete(streamId);
+    }
+    centralCleanup();
+  }
+
+  return {
+    client: client as StreamRpcClient<RpcContract<Methods, Events, StreamMethods>>,
     dispose,
   };
 }

@@ -1,19 +1,29 @@
 import * as S from "@effect/schema/Schema";
-import { Cause, Effect, Exit } from "effect";
+import { Cause, Effect, Exit, FiberId, Stream } from "effect";
+import type * as FiberType from "effect/Fiber";
 import * as Runtime from "effect/Runtime";
 import type {
+  AnyStreamMethod,
   RpcContract,
   RpcError,
   RpcEventPayload,
   RpcInput,
   RpcOutput,
+  StreamChunk,
+  StreamError,
+  StreamInput,
 } from "./contract.ts";
 import { isNoErrorSchema } from "./contract.ts";
 import {
   extractErrorTag,
+  formatUnknown,
   safelyCall,
   toDefectEnvelope,
   type RpcResponseEnvelope,
+  type StreamFrame,
+  type StreamEndFrame,
+  type StreamErrorFrame,
+  type StreamDefectFrame,
 } from "./protocol.ts";
 import {
   defaultChannelPrefix,
@@ -26,6 +36,8 @@ import {
   type RpcEndpoint,
   type RpcEndpointOptions,
   type RpcEventPublisher,
+  type StreamImplementations,
+  type WebContentsLike,
 } from "./types.ts";
 
 type RpcListener = (
@@ -35,6 +47,24 @@ type RpcListener = (
 
 function resolveChannelPrefix(prefix: ChannelPrefix | undefined): ChannelPrefix {
   return prefix ?? defaultChannelPrefix;
+}
+
+function isWebContentsLike(value: unknown): value is WebContentsLike {
+  if (typeof value !== "object" || value === null) return false;
+  const rec = value as Record<string, unknown>;
+  return (
+    typeof rec.id === "number" &&
+    typeof rec.isDestroyed === "function" &&
+    typeof rec.send === "function"
+  );
+}
+
+function extractSender(event: unknown): WebContentsLike | null {
+  if (typeof event !== "object" || event === null || !("sender" in event)) {
+    return null;
+  }
+  const sender = (event as Record<string, unknown>).sender;
+  return isWebContentsLike(sender) ? sender : null;
 }
 
 function isImplementation<M extends AnyMethod, R>(
@@ -48,18 +78,19 @@ function isImplementation<M extends AnyMethod, R>(
 export function createRpcEndpoint<
   const Methods extends ReadonlyArray<AnyMethod>,
   const Events extends ReadonlyArray<AnyEvent>,
+  const StreamMethods extends ReadonlyArray<AnyStreamMethod> = readonly [],
   R = never
 >(
-  contract: RpcContract<Methods, Events>,
+  contract: RpcContract<Methods, Events, StreamMethods>,
   ipc: IpcMainLike,
-  implementations: Implementations<RpcContract<Methods, Events>, R>,
-  options: RpcEndpointOptions<R>
+  implementations: Implementations<RpcContract<Methods, Events, StreamMethods>, R>,
+  options: RpcEndpointOptions<RpcContract<Methods, Events, StreamMethods>, R>
 ): RpcEndpoint {
   const channelPrefix = resolveChannelPrefix(options.channelPrefix);
   const diagnostics = options.diagnostics;
   const runPromiseExit = Runtime.runPromiseExit(options.runtime);
 
-  const implementationsByName: Implementations<RpcContract<Methods, Events>, R> &
+  const implementationsByName: Implementations<RpcContract<Methods, Events, StreamMethods>, R> &
     Record<string, unknown> = implementations;
 
   const methodNames = new Set(contract.methods.map((method) => method.name));
@@ -176,6 +207,193 @@ export function createRpcEndpoint<
     );
   }
 
+  // --- Stream handler setup ---
+
+  type ActiveStreamEntry = {
+    fiber: FiberType.RuntimeFiber<void, unknown> | null;
+    senderId: number;
+  };
+
+  const activeStreams = new Map<string, ActiveStreamEntry>();
+  const streamListeners = new Map<string, RpcListener>();
+  const streamMethods = contract.streamMethods ?? [];
+  const streamHandlerImpls = options.streamHandlers as
+    | (StreamImplementations<RpcContract<Methods, Events, StreamMethods>, R> &
+        Record<string, unknown>)
+    | undefined;
+
+  const cancelChannel = `${channelPrefix.rpc}stream-cancel`;
+
+  if (streamMethods.length > 0 && !streamHandlerImpls) {
+    throw new Error(
+      "Contract defines stream methods but no streamHandlers were provided."
+    );
+  }
+
+  if (streamMethods.length > 0 && streamHandlerImpls) {
+    const streamMethodNames = new Set(streamMethods.map((m) => m.name));
+
+    for (const name in streamHandlerImpls) {
+      if (!streamMethodNames.has(name)) {
+        throw new Error(`Stream implementation provided for unknown stream method: ${name}`);
+      }
+    }
+
+    const runFork = Runtime.runFork(options.runtime);
+
+    for (const method of streamMethods) {
+      const impl = streamHandlerImpls[method.name];
+      if (typeof impl !== "function") {
+        throw new Error(`Missing implementation for stream method: ${method.name}`);
+      }
+
+      const decodeInput = S.decodeUnknownSync(method.req);
+      const encodeChunk = S.encodeSync(method.chunk);
+      const encodeFailure = isNoErrorSchema(method.err)
+        ? null
+        : S.encodeSync(method.err);
+
+      const channel = `${channelPrefix.rpc}stream/${method.name}`;
+
+      streamListeners.set(
+        channel,
+        async function handleStreamRequest(
+          event: unknown,
+          rawPayload: unknown
+        ): Promise<RpcResponseEnvelope> {
+          if (
+            typeof rawPayload !== "object" ||
+            rawPayload === null
+          ) {
+            return toDefectEnvelope("Stream request payload must be an object");
+          }
+
+          const envelope = rawPayload as Record<string, unknown>;
+          const streamId = envelope.streamId;
+          const rawData = envelope.data;
+
+          if (typeof streamId !== "string" || streamId.length === 0) {
+            return toDefectEnvelope("Invalid streamId");
+          }
+
+          if (activeStreams.has(streamId)) {
+            return toDefectEnvelope("Duplicate streamId");
+          }
+
+          const sender = extractSender(event);
+          if (!sender) {
+            return toDefectEnvelope("Stream handler requires sender with webContents");
+          }
+
+          let input: StreamInput<typeof method>;
+          try {
+            input = decodeInput(rawData);
+          } catch (cause) {
+            safelyCall(diagnostics?.onDecodeFailure, {
+              scope: "stream-request" as const,
+              name: method.name,
+              payload: rawData,
+              cause,
+            });
+            return toDefectEnvelope(cause, `Stream ${method.name} request decode failed`);
+          }
+
+          const sfChannel = `${channelPrefix.rpc}sf`;
+
+          const trySend = (frame: StreamFrame): Effect.Effect<void> =>
+            Effect.try({
+              try: () => {
+                if (!sender.isDestroyed()) {
+                  sender.send(sfChannel, frame);
+                }
+              },
+              catch: () => undefined as void,
+            }).pipe(Effect.ignore);
+
+          let handlerStream: Stream.Stream<StreamChunk<typeof method>, StreamError<typeof method>, R>;
+          try {
+            handlerStream = impl(input) as typeof handlerStream;
+          } catch (cause) {
+            return toDefectEnvelope(cause, `Stream ${method.name} implementation threw`);
+          }
+
+          const buildTerminalFrame = (
+            cause: Cause.Cause<unknown>
+          ): StreamEndFrame | StreamErrorFrame | StreamDefectFrame => {
+            const failure = Cause.failureOption(cause);
+            if (failure._tag === "Some") {
+              if (encodeFailure) {
+                try {
+                  return {
+                    type: "error",
+                    streamId,
+                    error: {
+                      tag: extractErrorTag(failure.value),
+                      data: encodeFailure(failure.value),
+                    },
+                  };
+                } catch {
+                  // encoding failed, fall through to defect
+                }
+              }
+              return { type: "defect", streamId, message: formatUnknown(failure.value) };
+            }
+            if (Cause.isInterruptedOnly(cause)) {
+              return { type: "end", streamId };
+            }
+            const defect = Cause.dieOption(cause);
+            return {
+              type: "defect",
+              streamId,
+              message: defect._tag === "Some"
+                ? formatUnknown(defect.value)
+                : "Stream failed unexpectedly",
+            };
+          };
+
+          const streamEffect = handlerStream.pipe(
+            Stream.mapEffect((chunk: StreamChunk<typeof method>) =>
+              Effect.try({
+                try: () => {
+                  if (sender.isDestroyed()) return;
+                  sender.send(sfChannel, { type: "data", streamId, payload: encodeChunk(chunk) });
+                },
+                catch: () => undefined as void,
+              }).pipe(Effect.ignore)
+            ),
+            Stream.runDrain,
+
+            Effect.andThen(() => trySend({ type: "end", streamId })),
+
+            Effect.catchAllCause((cause) =>
+              sender.isDestroyed()
+                ? Effect.void
+                : trySend(buildTerminalFrame(cause))
+            ),
+
+            Effect.ensuring(
+              Effect.sync(() => {
+                activeStreams.delete(streamId);
+              })
+            )
+          );
+
+          // Reserve entry BEFORE forking
+          const entry: ActiveStreamEntry = {
+            fiber: null,
+            senderId: sender.id,
+          };
+          activeStreams.set(streamId, entry);
+
+          const fiber = runFork(streamEffect);
+          entry.fiber = fiber;
+
+          return { type: "success" as const, data: { type: "stream_started" } };
+        }
+      );
+    }
+  }
+
   let running = false;
   let disposed = false;
 
@@ -194,6 +412,39 @@ export function createRpcEndpoint<
       for (const [channel, listener] of listeners) {
         ipc.handle(channel, listener);
         registeredChannels.push(channel);
+      }
+
+      // Register stream handlers
+      for (const [channel, listener] of streamListeners) {
+        ipc.handle(channel, listener);
+        registeredChannels.push(channel);
+      }
+
+      // Register cancel handler if we have stream methods
+      if (streamMethods.length > 0) {
+        ipc.handle(cancelChannel, (event: unknown, rawPayload: unknown) => {
+          if (typeof rawPayload !== "object" || rawPayload === null) {
+            return { cancelled: false };
+          }
+
+          const streamId = (rawPayload as Record<string, unknown>).streamId;
+          if (typeof streamId !== "string") return { cancelled: false };
+
+          const entry = activeStreams.get(streamId);
+          if (!entry) return { cancelled: false };
+
+          // Validate sender identity
+          const sender = extractSender(event);
+          if (!sender || sender.id !== entry.senderId) return { cancelled: false };
+
+          // Interrupt the fiber
+          if (entry.fiber) {
+            entry.fiber.unsafeInterruptAsFork(FiberId.none);
+          }
+
+          return { cancelled: true };
+        });
+        registeredChannels.push(cancelChannel);
       }
     } catch (cause) {
       for (const channel of registeredChannels) {
@@ -215,11 +466,35 @@ export function createRpcEndpoint<
       return;
     }
 
+    // Interrupt all active stream fibers first
+    for (const entry of activeStreams.values()) {
+      if (entry.fiber) {
+        entry.fiber.unsafeInterruptAsFork(FiberId.none);
+      }
+    }
+    activeStreams.clear();
+
     let firstError: unknown;
 
     for (const channel of listeners.keys()) {
       try {
         ipc.removeHandler(channel);
+      } catch (cause) {
+        firstError ??= cause;
+      }
+    }
+
+    for (const channel of streamListeners.keys()) {
+      try {
+        ipc.removeHandler(channel);
+      } catch (cause) {
+        firstError ??= cause;
+      }
+    }
+
+    if (streamMethods.length > 0) {
+      try {
+        ipc.removeHandler(cancelChannel);
       } catch (cause) {
         firstError ??= cause;
       }
@@ -283,11 +558,12 @@ function clampQueueSize(maxQueueSize: number | undefined): number {
 
 export function createEventPublisher<
   const Methods extends ReadonlyArray<AnyMethod>,
-  const Events extends ReadonlyArray<AnyEvent>
+  const Events extends ReadonlyArray<AnyEvent>,
+  const StreamMethods extends ReadonlyArray<AnyStreamMethod> = readonly []
 >(
-  _contract: RpcContract<Methods, Events>,
+  _contract: RpcContract<Methods, Events, StreamMethods>,
   options: EventPublisherOptions
-): RpcEventPublisher<RpcContract<Methods, Events>> {
+): RpcEventPublisher<RpcContract<Methods, Events, StreamMethods>> {
   const channelPrefix = resolveChannelPrefix(options.channelPrefix);
   const diagnostics = options.diagnostics;
   const maxQueueSize = clampQueueSize(options.maxQueueSize);

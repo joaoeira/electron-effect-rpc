@@ -9,6 +9,7 @@ tutorial track first:
 - [First RPC: Main + Preload + Renderer](./tutorials/01-first-rpc.md)
 - [Typed Errors, Defects, and Diagnostics](./tutorials/02-typed-errors-defects-diagnostics.md)
 - [Events, Lifecycle, and Backpressure](./tutorials/03-events-lifecycle-backpressure.md)
+- [Streaming RPC](./tutorials/04-streaming-rpc.md)
 
 If you are changing internals, start with the architecture and ADRs:
 

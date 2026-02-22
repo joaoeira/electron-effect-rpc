@@ -73,6 +73,91 @@ export function safelyCall<T>(
   }
 }
 
+export type StreamDataFrame = {
+  readonly type: "data";
+  readonly streamId: string;
+  readonly payload: unknown;
+};
+
+export type StreamEndFrame = {
+  readonly type: "end";
+  readonly streamId: string;
+};
+
+export type StreamErrorFrame = {
+  readonly type: "error";
+  readonly streamId: string;
+  readonly error: {
+    readonly tag: string;
+    readonly data: unknown;
+  };
+};
+
+export type StreamDefectFrame = {
+  readonly type: "defect";
+  readonly streamId: string;
+  readonly message: string;
+};
+
+export type StreamFrame =
+  | StreamDataFrame
+  | StreamEndFrame
+  | StreamErrorFrame
+  | StreamDefectFrame;
+
+export function extractStreamIdFromRaw(value: unknown): string | null {
+  if (!isRecord(value) || typeof value.streamId !== "string") {
+    return null;
+  }
+  return value.streamId;
+}
+
+export function parseStreamFrame(value: unknown): StreamFrame | null {
+  if (!isRecord(value) || typeof value.type !== "string") {
+    return null;
+  }
+
+  if (typeof value.streamId !== "string") {
+    return null;
+  }
+
+  const streamId = value.streamId;
+
+  switch (value.type) {
+    case "data":
+      if (!hasOwn(value, "payload")) {
+        return null;
+      }
+      return { type: "data", streamId, payload: value.payload };
+
+    case "end":
+      return { type: "end", streamId };
+
+    case "error":
+      if (
+        !isRecord(value.error) ||
+        typeof value.error.tag !== "string" ||
+        !hasOwn(value.error, "data")
+      ) {
+        return null;
+      }
+      return {
+        type: "error",
+        streamId,
+        error: { tag: value.error.tag, data: value.error.data },
+      };
+
+    case "defect":
+      if (typeof value.message !== "string") {
+        return null;
+      }
+      return { type: "defect", streamId, message: value.message };
+
+    default:
+      return null;
+  }
+}
+
 export function parseRpcResponseEnvelope(
   value: unknown
 ): RpcResponseEnvelope | null {

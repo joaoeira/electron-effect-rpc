@@ -88,6 +88,59 @@ export const exitSchemaFor = <
     defect: S.Defect,
   });
 
+export interface StreamRpcMethod<
+  Name extends string,
+  Req extends SchemaNoContext,
+  Chunk extends SchemaNoContext,
+  Err extends ErrorSchema = NoError
+> {
+  readonly _tag: "StreamRpcMethod";
+  readonly name: Name;
+  readonly req: Req;
+  readonly chunk: Chunk;
+  readonly err: Err;
+}
+
+export function streamRpc<
+  const Name extends string,
+  Req extends SchemaNoContext,
+  Chunk extends SchemaNoContext,
+  Err extends ErrorSchema
+>(name: Name, req: Req, chunk: Chunk, err: Err): StreamRpcMethod<Name, Req, Chunk, Err>;
+
+export function streamRpc<
+  const Name extends string,
+  Req extends SchemaNoContext,
+  Chunk extends SchemaNoContext
+>(name: Name, req: Req, chunk: Chunk): StreamRpcMethod<Name, Req, Chunk, NoError>;
+
+export function streamRpc<const Name extends string>(
+  name: Name,
+  req: SchemaNoContext,
+  chunk: SchemaNoContext,
+  err: ErrorSchema = NoError
+): StreamRpcMethod<Name, SchemaNoContext, SchemaNoContext, ErrorSchema> {
+  return { _tag: "StreamRpcMethod", name, req, chunk, err };
+}
+
+export type AnyStreamMethod = StreamRpcMethod<
+  string,
+  SchemaNoContext,
+  SchemaNoContext,
+  ErrorSchema
+>;
+
+export type StreamInput<M extends AnyStreamMethod> = S.Schema.Type<M["req"]>;
+
+export type StreamChunk<M extends AnyStreamMethod> = S.Schema.Type<M["chunk"]>;
+
+export type StreamError<M extends AnyStreamMethod> = S.Schema.Type<M["err"]>;
+
+export type ExtractStreamMethod<
+  Methods extends readonly AnyStreamMethod[],
+  Name extends string
+> = Extract<Methods[number], { readonly name: Name }>;
+
 export type AnyMethod = RpcMethod<
   string,
   SchemaNoContext,
@@ -113,10 +166,12 @@ export type ExtractMethod<
 
 export interface RpcContract<
   Methods extends ReadonlyArray<AnyMethod>,
-  Events extends ReadonlyArray<AnyEvent>
+  Events extends ReadonlyArray<AnyEvent>,
+  StreamMethods extends ReadonlyArray<AnyStreamMethod> = readonly []
 > {
   readonly methods: Methods;
   readonly events: Events;
+  readonly streamMethods: StreamMethods;
 }
 
 function collectDuplicates(names: ReadonlyArray<string>): Array<string> {
@@ -134,16 +189,40 @@ function collectDuplicates(names: ReadonlyArray<string>): Array<string> {
   return duplicates;
 }
 
+const RESERVED_STREAM_NAMES = new Set(["sf", "stream-cancel"]);
+
+function hasReservedStreamPrefix(name: string): boolean {
+  return name.startsWith("stream/");
+}
+
+function validateReservedNames(names: ReadonlyArray<string>, kind: string): void {
+  for (const name of names) {
+    if (RESERVED_STREAM_NAMES.has(name)) {
+      throw new Error(
+        `${kind} name "${name}" is reserved for internal stream transport.`
+      );
+    }
+    if (hasReservedStreamPrefix(name)) {
+      throw new Error(
+        `${kind} name "${name}" must not start with "stream/" (reserved for internal stream transport).`
+      );
+    }
+  }
+}
+
 export function defineContract<
   const Methods extends ReadonlyArray<AnyMethod>,
-  const Events extends ReadonlyArray<AnyEvent>
+  const Events extends ReadonlyArray<AnyEvent>,
+  const StreamMethods extends ReadonlyArray<AnyStreamMethod> = readonly []
 >(
   input: {
     readonly methods: Methods;
     readonly events: Events;
+    readonly streamMethods?: StreamMethods;
   }
-): RpcContract<Methods, Events> {
+): RpcContract<Methods, Events, StreamMethods> {
   const { methods, events } = input;
+  const streamMethods = (input.streamMethods ?? []) as unknown as StreamMethods;
 
   if (!Array.isArray(methods)) {
     throw new Error("RPC contract methods must be an array.");
@@ -153,7 +232,14 @@ export function defineContract<
     throw new Error("RPC contract events must be an array.");
   }
 
-  const duplicateMethods = collectDuplicates(methods.map((method) => method.name));
+  if (!Array.isArray(streamMethods)) {
+    throw new Error("RPC contract streamMethods must be an array.");
+  }
+
+  const methodNames = methods.map((method) => method.name);
+  const streamMethodNames = streamMethods.map((m) => m.name);
+
+  const duplicateMethods = collectDuplicates(methodNames);
   if (duplicateMethods.length > 0) {
     throw new Error(
       `Duplicate RPC method name(s): ${duplicateMethods.join(", ")}`
@@ -167,5 +253,22 @@ export function defineContract<
     );
   }
 
-  return input;
+  const duplicateStreamMethods = collectDuplicates(streamMethodNames);
+  if (duplicateStreamMethods.length > 0) {
+    throw new Error(
+      `Duplicate stream method name(s): ${duplicateStreamMethods.join(", ")}`
+    );
+  }
+
+  const crossDuplicates = collectDuplicates([...methodNames, ...streamMethodNames]);
+  if (crossDuplicates.length > 0) {
+    throw new Error(
+      `Name collision between methods and streamMethods: ${crossDuplicates.join(", ")}`
+    );
+  }
+
+  validateReservedNames(methodNames, "Method");
+  validateReservedNames(streamMethodNames, "Stream method");
+
+  return { methods, events, streamMethods };
 }

@@ -1,9 +1,15 @@
 import { Effect } from "effect";
 import type * as Runtime from "effect/Runtime";
-import type { AnyEvent, AnyMethod, RpcContract, RpcEventPayload } from "./contract.ts";
+import type {
+  AnyEvent,
+  AnyMethod,
+  AnyStreamMethod,
+  RpcContract,
+  RpcEventPayload,
+} from "./contract.ts";
 import { createEventPublisher, createRpcEndpoint } from "./main.ts";
 import { exposeIpcBridge, createBridgeAdapters } from "./preload.ts";
-import { createEventSubscriber, createRpcClient } from "./renderer.ts";
+import { createEventSubscriber, createRpcClient, createStreamRpcClient } from "./renderer.ts";
 import {
   defaultChannelPrefix,
   type ChannelPrefix,
@@ -13,18 +19,24 @@ import {
   type EventSubscriber,
   type IpcMainLike,
   type Implementations,
+  type OnStreamFrame,
   type RendererWindowLike,
   type RpcClient,
+  type RpcClientDiagnostics,
   type RpcEndpoint,
   type RpcEndpointDiagnostics,
   type RpcEventPublisher,
   type RpcInvoke,
   type RpcResponseDecodeMode,
+  type StreamImplementations,
+  type StreamRpcClient,
+  type StreamRpcClientHandle,
 } from "./types.ts";
 
 export type IpcBridge = {
   readonly invoke: RpcInvoke;
   readonly subscribe: EventSubscribe;
+  readonly onStreamFrame?: OnStreamFrame;
 };
 
 export type IpcBridgeGlobal<Name extends string = "api"> = {
@@ -32,7 +44,7 @@ export type IpcBridgeGlobal<Name extends string = "api"> = {
 };
 
 export type IpcKitOptions<
-  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[]>
+  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>
 > = {
   readonly contract: C;
   readonly channelPrefix?: ChannelPrefix;
@@ -46,7 +58,7 @@ export type IpcKitOptions<
 };
 
 type IpcMainOptions<
-  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[]>,
+  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>,
   R
 > = {
   readonly ipcMain: IpcMainLike;
@@ -54,6 +66,7 @@ type IpcMainOptions<
   readonly runtime: Runtime.Runtime<R>;
   readonly getWindows: () => ReadonlyArray<RendererWindowLike>;
   readonly maxQueueSize?: number;
+  readonly streamHandlers?: StreamImplementations<C, R>;
   readonly diagnostics?: {
     readonly rpc?: RpcEndpointDiagnostics;
     readonly events?: EventPublisherDiagnostics;
@@ -61,7 +74,7 @@ type IpcMainOptions<
 };
 
 export type IpcMainHandle<
-  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[]>
+  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>
 > = {
   readonly endpoint: RpcEndpoint;
   readonly publisher: RpcEventPublisher<C>;
@@ -80,7 +93,7 @@ export type IpcMainHandle<
 };
 
 export type IpcKit<
-  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[]>
+  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>
 > = {
   readonly contract: C;
   readonly config: {
@@ -98,15 +111,18 @@ export type IpcKit<
   readonly renderer: (bridge: IpcBridge) => {
     readonly client: RpcClient<C>;
     readonly events: EventSubscriber<C>;
+    readonly streamClient: StreamRpcClient<C>;
+    readonly dispose: () => void;
   };
 };
 
 export function createIpcKit<
   const Methods extends ReadonlyArray<AnyMethod>,
-  const Events extends ReadonlyArray<AnyEvent>
+  const Events extends ReadonlyArray<AnyEvent>,
+  const StreamMethods extends ReadonlyArray<AnyStreamMethod> = readonly []
 >(
-  options: IpcKitOptions<RpcContract<Methods, Events>>
-): IpcKit<RpcContract<Methods, Events>> {
+  options: IpcKitOptions<RpcContract<Methods, Events, StreamMethods>>
+): IpcKit<RpcContract<Methods, Events, StreamMethods>> {
   const contract = options.contract;
   const channelPrefix = options.channelPrefix
     ? { ...options.channelPrefix }
@@ -116,8 +132,8 @@ export function createIpcKit<
   const eventDecodeMode = options.decode?.events ?? "safe";
 
   const main = <R>(
-    mainOptions: IpcMainOptions<RpcContract<Methods, Events>, R>
-  ): IpcMainHandle<RpcContract<Methods, Events>> => {
+    mainOptions: IpcMainOptions<RpcContract<Methods, Events, StreamMethods>, R>
+  ): IpcMainHandle<RpcContract<Methods, Events, StreamMethods>> => {
     const endpoint = createRpcEndpoint(
       contract,
       mainOptions.ipcMain,
@@ -126,6 +142,7 @@ export function createIpcKit<
         runtime: mainOptions.runtime,
         channelPrefix,
         diagnostics: mainOptions.diagnostics?.rpc,
+        streamHandlers: mainOptions.streamHandlers,
       }
     );
 
@@ -194,7 +211,7 @@ export function createIpcKit<
       return endpoint.isRunning() && publisher.isRunning();
     }
 
-    function publish<E extends RpcContract<Methods, Events>["events"][number]>(
+    function publish<E extends RpcContract<Methods, Events, StreamMethods>["events"][number]>(
       event: E,
       payload: RpcEventPayload<E>
     ): Effect.Effect<void, never> {
@@ -232,6 +249,27 @@ export function createIpcKit<
   };
 
   const renderer = (bridge: IpcBridge) => {
+    const hasStreamMethods = (contract.streamMethods?.length ?? 0) > 0;
+
+    if (hasStreamMethods && !bridge.onStreamFrame) {
+      throw new Error(
+        "Contract defines stream methods but bridge.onStreamFrame is missing. " +
+        "Ensure the preload bridge exposes onStreamFrame."
+      );
+    }
+
+    let streamHandle: StreamRpcClientHandle<RpcContract<Methods, Events, StreamMethods>> | null = null;
+    if (hasStreamMethods && bridge.onStreamFrame) {
+      streamHandle = createStreamRpcClient(contract, {
+        invoke: bridge.invoke,
+        onStreamFrame: bridge.onStreamFrame,
+      });
+    }
+
+    const emptyStreamClient = Object.create(null) as StreamRpcClient<
+      RpcContract<Methods, Events, StreamMethods>
+    >;
+
     return {
       client: createRpcClient(contract, {
         invoke: bridge.invoke,
@@ -241,6 +279,10 @@ export function createIpcKit<
         subscribe: bridge.subscribe,
         decodeMode: eventDecodeMode,
       }),
+      streamClient: streamHandle?.client ?? emptyStreamClient,
+      dispose: () => {
+        streamHandle?.dispose();
+      },
     };
   };
 

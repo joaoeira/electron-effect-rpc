@@ -10,6 +10,7 @@ import {
 export type BridgeAdapters = {
   readonly invoke: RpcInvoke;
   readonly subscribe: EventSubscribe;
+  readonly onStreamFrame: (listener: (frame: unknown) => void) => () => void;
 };
 
 export type BridgeAdaptersOptions = {
@@ -84,9 +85,20 @@ export function createBridgeAdapters(
     };
   };
 
+  const onStreamFrame = (listener: (frame: unknown) => void) => {
+    const channel = `${channelPrefix.rpc}sf`;
+    const wrapped = (_event: IpcRendererEvent, frame: unknown) =>
+      listener(frame);
+    ipcRenderer.on(channel, wrapped);
+    return () => {
+      ipcRenderer.removeListener(channel, wrapped);
+    };
+  };
+
   return {
     invoke,
     subscribe,
+    onStreamFrame,
   };
 }
 
@@ -101,6 +113,7 @@ export function exposeRpcBridge(options?: BridgeExposureOptions): void {
 
   contextBridge.exposeInMainWorld(rpcGlobal, {
     invoke: adapters.invoke,
+    onStreamFrame: adapters.onStreamFrame,
   });
 
   contextBridge.exposeInMainWorld(eventsGlobal, {
@@ -119,5 +132,6 @@ export function exposeIpcBridge(options?: IpcBridgeExposureOptions): void {
   contextBridge.exposeInMainWorld(global, {
     invoke: adapters.invoke,
     subscribe: adapters.subscribe,
+    onStreamFrame: adapters.onStreamFrame,
   });
 }

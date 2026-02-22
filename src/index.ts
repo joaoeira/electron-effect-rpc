@@ -1,5 +1,5 @@
 export { createIpcKit } from "./kit.ts";
-export { defineContract, event, NoError, rpc } from "./contract.ts";
+export { defineContract, event, NoError, rpc, streamRpc } from "./contract.ts";
 export type {
   IpcBridge,
   IpcBridgeGlobal,

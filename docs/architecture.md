@@ -40,6 +40,30 @@ drop-oldest under pressure to avoid unbounded memory growth in the main process.
 Diagnostics callbacks are always invoked through `safelyCall` so observability
 cannot destabilize transport behavior.
 
+Streaming RPC extends the request-response model to support long-running
+operations that emit multiple values over time. The contract gains a
+`streamMethods` array alongside `methods` and `events`, defined with
+`streamRpc()`. On main, stream handlers return `Stream.Stream` instead of
+`Effect.Effect`. On the renderer, stream callers return `Stream.Stream` that
+the consumer pulls from like any other Effect stream.
+
+The streaming protocol uses a fixed-channel design. The renderer generates a
+`streamId` (UUID) and registers a frame dispatcher before calling `invoke` on a
+handshake channel (`rpc/stream/{name}`). This eliminates the race condition
+where frames arrive before the listener is set up. Main forks a Fiber for each
+stream and sends data, end, error, or defect frames through a single shared
+channel (`rpc/sf`) with the `streamId` in each payload. Cancellation goes
+through `invoke` on `rpc/stream-cancel`, keeping the `IpcMainLike` type
+unchanged (no `on`/`removeListener` needed).
+
+On main, active streams are tracked in a map keyed by `streamId`. Each entry
+stores the Fiber reference and the sender's `webContents.id` so that cancel
+requests are authenticated. When the endpoint stops, all active Fibers are
+interrupted before handlers are removed. On the renderer, `Stream.asyncPush`
+drives the consumer with an `addFinalizer` that cleans up the frame dispatcher
+and sends a cancel to main. The stream client has its own `dispose()` method
+that fails any active streams before removing the central frame listener.
+
 Compatibility is handled in the renderer by supporting a dual decode mode for
 RPC responses. Envelope transport is the primary wire contract, but `dual` mode
 can still decode legacy `Effect.Exit` payloads during migration windows. This

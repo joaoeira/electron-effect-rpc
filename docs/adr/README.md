@@ -17,6 +17,7 @@ The current accepted ADRs are:
 - `docs/adr/0006-bounded-event-queue-with-drop-oldest.md`
 - `docs/adr/0007-safe-diagnostics-and-boundary-validation.md`
 - `docs/adr/0008-esm-only-subpath-entrypoints.md`
+- `docs/adr/0009-streaming-rpc-fixed-channel-protocol.md`
 
 When adding a new ADR, continue the numbering and mark status clearly. If a
 decision is superseded, do not rewrite history; create a new ADR and reference
