@@ -108,7 +108,8 @@ void Effect.runPromise(
 ```ts
 import { ipc } from "./shared-ipc.ts";
 
-ipc.preload().expose();
+const { expose } = await ipc.preload();
+expose();
 ```
 
 This exposes one global by default: `window.api`.

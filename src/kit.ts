@@ -8,7 +8,6 @@ import type {
   RpcEventPayload,
 } from "./contract.ts";
 import { createEventPublisher, createRpcEndpoint } from "./main.ts";
-import { exposeIpcBridge, createBridgeAdapters } from "./preload.ts";
 import { createEventSubscriber, createRpcClient, createStreamRpcClient } from "./renderer.ts";
 import {
   defaultChannelPrefix,
@@ -105,11 +104,11 @@ export type IpcKit<
     readonly streamBuffer: StreamBufferOptions;
   };
   readonly main: <R>(options: IpcMainOptions<C, R>) => IpcMainHandle<C>;
-  readonly preload: (options?: { readonly global?: string }) => {
+  readonly preload: (options?: { readonly global?: string }) => Promise<{
     readonly global: string;
     readonly bridge: IpcBridge;
     readonly expose: () => void;
-  };
+  }>;
   readonly renderer: (bridge: IpcBridge) => {
     readonly client: RpcClient<C>;
     readonly events: EventSubscriber<C>;
@@ -240,7 +239,8 @@ export function createIpcKit<
     };
   };
 
-  const preload = (preloadOptions?: { readonly global?: string }) => {
+  const preload = async (preloadOptions?: { readonly global?: string }) => {
+    const { createBridgeAdapters, exposeIpcBridge } = await import("./preload.ts");
     const global = preloadOptions?.global ?? bridgeGlobal;
     const bridge = createBridgeAdapters({
       channelPrefix,
