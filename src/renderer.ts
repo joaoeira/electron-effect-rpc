@@ -404,6 +404,7 @@ export function createStreamRpcClient<
   const invoke = options.invoke;
   const onStreamFrame = options.onStreamFrame;
   const diagnostics = options.diagnostics;
+  const streamBuffer = options.streamBuffer ?? { bufferSize: "unbounded" as const };
 
   type FrameHandler = {
     data: (payload: unknown) => void;
@@ -504,7 +505,21 @@ export function createStreamRpcClient<
                   );
                   return;
                 }
-                emit.single(decoded);
+                // `emit.single(...) === false` indicates a closed emitter, not
+                // bounded-buffer overflow.
+                const accepted = emit.single(decoded);
+                if (!accepted) {
+                  // Stream has already finished. Remove dispatcher entry on the
+                  // first post-close frame to avoid repeated diagnostics.
+                  frameDispatcher.delete(streamId);
+                  safelyCall(diagnostics?.onProtocolError, {
+                    method: method.name,
+                    response: rawPayload,
+                    cause: new Error(
+                      `Stream ${method.name} received a post-close data frame; frame ignored`,
+                    ),
+                  });
+                }
               },
               end: () => emit.end(),
               error: (err) => {
@@ -599,7 +614,7 @@ export function createStreamRpcClient<
               );
             }
           }),
-        { bufferSize: 16, strategy: "dropping" },
+        streamBuffer,
       );
     };
 

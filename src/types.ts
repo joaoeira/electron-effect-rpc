@@ -293,10 +293,25 @@ export interface EventSubscriber<
 
 export type OnStreamFrame = (listener: (frame: unknown) => void) => () => void;
 
+/**
+ * Stream chunk buffering policy in the renderer.
+ * Prefer `bufferSize: "unbounded"` for lossless streams such as token deltas.
+ *
+ * Bounded buffers are lossy. With the current Effect `Stream.asyncPush`
+ * internals, terminal signals can also be lost under sustained pressure.
+ */
+export type StreamBufferOptions =
+  | { readonly bufferSize: "unbounded" }
+  | {
+      readonly bufferSize: number;
+      readonly strategy: "dropping" | "sliding";
+    };
+
 export type StreamRpcClientOptions = {
   readonly invoke: RpcInvoke;
   readonly onStreamFrame: OnStreamFrame;
   readonly diagnostics?: RpcClientDiagnostics;
+  readonly streamBuffer?: StreamBufferOptions;
 };
 
 export interface StreamRpcClientHandle<

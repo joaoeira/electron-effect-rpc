@@ -37,8 +37,10 @@ and `event()`. The protocol uses:
 
 5. **Stream.asyncPush on renderer:** The renderer stream client uses
    `Stream.asyncPush` with `Effect.addFinalizer` for deterministic cleanup on
-   all exit paths (success, failure, interruption). Buffer is bounded at 16 with
-   a dropping strategy per ADR-0006's principle.
+   all exit paths (success, failure, interruption). Buffer policy is configurable
+   per stream client (`streamBuffer`), and defaults to `bufferSize: "unbounded"`
+   for lossless delivery by default. Bounded policies are lossy by design, and
+   terminal signals may be silently dropped under sustained pressure.
 
 ## Consequences
 

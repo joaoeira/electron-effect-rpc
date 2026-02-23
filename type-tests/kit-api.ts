@@ -18,6 +18,37 @@ const kit = createIpcKit({
   contract,
 });
 
+const kitWithStreamBuffer = createIpcKit({
+  contract,
+  streamBuffer: {
+    bufferSize: "unbounded",
+  },
+});
+void kitWithStreamBuffer;
+
+createIpcKit({
+  contract,
+  streamBuffer: {
+    // @ts-expect-error Unsupported stream buffer strategy.
+    strategy: "suspend",
+    bufferSize: 32,
+  },
+});
+
+createIpcKit({
+  contract,
+  // @ts-expect-error Bounded buffer requires both bufferSize and strategy.
+  streamBuffer: {},
+});
+
+createIpcKit({
+  contract,
+  // @ts-expect-error Bounded buffer requires strategy.
+  streamBuffer: {
+    bufferSize: 32,
+  },
+});
+
 const bridge = {
   invoke: async (method: string) => {
     if (method === "Ping") {

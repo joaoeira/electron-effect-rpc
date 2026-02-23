@@ -100,6 +100,8 @@ import { contract } from "./contract.ts";
 const streamHandle = createStreamRpcClient(contract, {
   invoke: window.api.invoke,
   onStreamFrame: window.api.onStreamFrame!,
+  // Optional: defaults to { bufferSize: "unbounded" } for lossless delivery.
+  // streamBuffer: { bufferSize: 64, strategy: "dropping" },
 });
 
 // Collect all chunks
@@ -132,6 +134,21 @@ streamHandle.dispose();
 
 With `createIpcKit`, streaming is wired automatically. The renderer return
 value includes `streamClient` alongside `client` and `events`.
+
+You can set a default stream buffer policy per kit:
+
+```ts
+const ipc = createIpcKit({
+  contract,
+  streamBuffer: { bufferSize: "unbounded" },
+});
+```
+
+Bounded stream buffers (`dropping` / `sliding`) are intentionally lossy and are
+not appropriate for token-delta streams where every chunk matters. Under
+sustained pressure, bounded buffering can silently lose terminal signals with
+current `Stream.asyncPush` internals, and there is no recovery path at this
+layer. Prefer unbounded buffering for finite streams.
 
 ```ts
 const { client, events, streamClient, dispose } = ipc.renderer(window.api);

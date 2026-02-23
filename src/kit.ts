@@ -30,6 +30,7 @@ import {
   type StreamImplementations,
   type StreamRpcClient,
   type StreamRpcClientHandle,
+  type StreamBufferOptions,
 } from "./types.ts";
 
 export type IpcBridge = {
@@ -54,6 +55,7 @@ export type IpcKitOptions<
     readonly rpc?: RpcResponseDecodeMode;
     readonly events?: EventDecodeMode;
   };
+  readonly streamBuffer?: StreamBufferOptions;
 };
 
 type IpcMainOptions<
@@ -100,6 +102,7 @@ export type IpcKit<
     readonly bridgeGlobal: string;
     readonly rpcDecodeMode: RpcResponseDecodeMode;
     readonly eventDecodeMode: EventDecodeMode;
+    readonly streamBuffer: StreamBufferOptions;
   };
   readonly main: <R>(options: IpcMainOptions<C, R>) => IpcMainHandle<C>;
   readonly preload: (options?: { readonly global?: string }) => {
@@ -122,6 +125,18 @@ export function createIpcKit<
 >(
   options: IpcKitOptions<RpcContract<Methods, Events, StreamMethods>>,
 ): IpcKit<RpcContract<Methods, Events, StreamMethods>> {
+  const normalizeStreamBuffer = (buffer: StreamBufferOptions | undefined): StreamBufferOptions => {
+    if (!buffer || buffer.bufferSize === "unbounded") {
+      const resolved: StreamBufferOptions = { bufferSize: "unbounded" };
+      return Object.freeze(resolved);
+    }
+    const resolved: StreamBufferOptions = {
+      bufferSize: buffer.bufferSize,
+      strategy: buffer.strategy,
+    };
+    return Object.freeze(resolved);
+  };
+
   const contract = options.contract;
   const channelPrefix = options.channelPrefix
     ? { ...options.channelPrefix }
@@ -129,6 +144,7 @@ export function createIpcKit<
   const bridgeGlobal = options.bridge?.global ?? "api";
   const rpcDecodeMode = options.decode?.rpc ?? "envelope";
   const eventDecodeMode = options.decode?.events ?? "safe";
+  const streamBuffer = normalizeStreamBuffer(options.streamBuffer);
 
   const main = <R>(
     mainOptions: IpcMainOptions<RpcContract<Methods, Events, StreamMethods>, R>,
@@ -258,6 +274,7 @@ export function createIpcKit<
       streamHandle = createStreamRpcClient(contract, {
         invoke: bridge.invoke,
         onStreamFrame: bridge.onStreamFrame,
+        streamBuffer,
       });
     }
 
@@ -287,6 +304,7 @@ export function createIpcKit<
       bridgeGlobal,
       rpcDecodeMode,
       eventDecodeMode,
+      streamBuffer,
     },
     main,
     preload,

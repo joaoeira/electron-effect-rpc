@@ -78,6 +78,94 @@ const createStreamHarness = (prefix = { rpc: "rpc/", event: "event/" }) => {
   };
 };
 
+const createScheduledFrameBridge = ({
+  totalFrames,
+  framesPerTick = 1,
+  tickDelayMs = 0,
+  tailFramesAfterEnd = 0,
+}: {
+  totalFrames: number;
+  framesPerTick?: number;
+  tickDelayMs?: number;
+  tailFramesAfterEnd?: number;
+}) => {
+  const listeners = new Set<(frame: unknown) => void>();
+  const cancelled = new Set<string>();
+  const cancelCalls: string[] = [];
+  const startedStreamIds: string[] = [];
+
+  const onStreamFrame: OnStreamFrame = (listener) => {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  };
+
+  const emitFrame = (frame: unknown) => {
+    for (const listener of listeners) {
+      listener(frame);
+    }
+  };
+
+  const invoke = async (method: string, payload: unknown) => {
+    if (method === "stream-cancel") {
+      if (isRecord(payload) && typeof payload.streamId === "string") {
+        cancelCalls.push(payload.streamId);
+        cancelled.add(payload.streamId);
+      }
+      return { cancelled: true };
+    }
+    if (!method.startsWith("stream/")) {
+      return { type: "success", data: {} };
+    }
+
+    if (!isRecord(payload) || typeof payload.streamId !== "string") {
+      throw new Error("Missing streamId in stream invoke payload");
+    }
+    const streamId = payload.streamId;
+    startedStreamIds.push(streamId);
+
+    let sent = 0;
+
+    const pump = () => {
+      if (cancelled.has(streamId)) {
+        return;
+      }
+
+      const nextBatchSize = Math.min(framesPerTick, totalFrames - sent);
+      for (let i = 0; i < nextBatchSize; i += 1) {
+        emitFrame({ type: "data", streamId, payload: { value: sent + i } });
+      }
+      sent += nextBatchSize;
+
+      if (sent >= totalFrames) {
+        emitFrame({ type: "end", streamId });
+        for (let i = 0; i < tailFramesAfterEnd; i += 1) {
+          emitFrame({ type: "data", streamId, payload: { value: totalFrames + i } });
+        }
+        return;
+      }
+
+      setTimeout(pump, tickDelayMs);
+    };
+
+    setTimeout(pump, tickDelayMs);
+
+    return {
+      type: "success",
+      data: { type: "stream_started" },
+    };
+  };
+
+  return {
+    invoke,
+    onStreamFrame,
+    cancelCalls,
+    startedStreamIds,
+    emitFrame,
+  };
+};
+
 const waitFor = async (predicate: () => boolean, timeoutMs = 2000) => {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -1533,6 +1621,228 @@ describe("renderer-side stream edge cases", () => {
 
     streamHandle.dispose();
   });
+
+  it("when default stream buffer is used, then slow consumers receive all chunks", async () => {
+    const totalFrames = 120;
+    const bridge = createScheduledFrameBridge({
+      totalFrames,
+      framesPerTick: 1,
+    });
+
+    const streamHandle = createStreamRpcClient(contract, {
+      invoke: bridge.invoke,
+      onStreamFrame: bridge.onStreamFrame,
+    });
+
+    const seen: number[] = [];
+
+    await Promise.race([
+      Effect.runPromise(
+        streamHandle.client.StreamAdd({ count: 1 }).pipe(
+          Stream.runForEach((chunk) =>
+            Effect.sleep("1 millis").pipe(
+              Effect.andThen(
+                Effect.sync(() => {
+                  seen.push(chunk.value);
+                }),
+              ),
+            ),
+          ),
+        ),
+      ),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Timed out waiting for stream completion")), 5000),
+      ),
+    ]);
+
+    expect(seen).toEqual(Array.from({ length: totalFrames }, (_, i) => i));
+
+    streamHandle.dispose();
+  });
+
+  it("when streamBuffer is omitted or explicitly unbounded, then behavior is equivalent", async () => {
+    const totalFrames = 80;
+    const expected = Array.from({ length: totalFrames }, (_, i) => i);
+
+    const defaultBridge = createScheduledFrameBridge({ totalFrames });
+    const explicitBridge = createScheduledFrameBridge({ totalFrames });
+
+    const defaultHandle = createStreamRpcClient(contract, {
+      invoke: defaultBridge.invoke,
+      onStreamFrame: defaultBridge.onStreamFrame,
+    });
+    const explicitHandle = createStreamRpcClient(contract, {
+      invoke: explicitBridge.invoke,
+      onStreamFrame: explicitBridge.onStreamFrame,
+      streamBuffer: { bufferSize: "unbounded" },
+    });
+
+    const collectValues = (handle: typeof defaultHandle) =>
+      Effect.runPromise(
+        handle.client.StreamAdd({ count: 1 }).pipe(
+          Stream.runCollect,
+          Effect.map((chunk) => Array.from(chunk, (item) => item.value)),
+        ),
+      );
+
+    const [defaultValues, explicitValues] = await Promise.all([
+      collectValues(defaultHandle),
+      collectValues(explicitHandle),
+    ]);
+
+    expect(defaultValues).toEqual(expected);
+    expect(explicitValues).toEqual(expected);
+    expect(explicitValues).toEqual(defaultValues);
+
+    defaultHandle.dispose();
+    explicitHandle.dispose();
+  });
+
+  it("when post-close data frames keep arriving, then post-close protocol diagnostics are emitted once", async () => {
+    const bridge = createScheduledFrameBridge({
+      totalFrames: 0,
+    });
+    const protocolErrors: unknown[] = [];
+    let activeStreamId = "";
+
+    const streamHandle = createStreamRpcClient(contract, {
+      invoke: async (method, payload) => {
+        if (method === "stream-cancel") {
+          return { cancelled: true };
+        }
+        if (method.startsWith("stream/")) {
+          if (!isRecord(payload) || typeof payload.streamId !== "string") {
+            throw new Error("Missing streamId");
+          }
+          activeStreamId = payload.streamId;
+          return { type: "success", data: { type: "stream_started" } };
+        }
+        return { type: "success", data: {} };
+      },
+      onStreamFrame: bridge.onStreamFrame,
+      diagnostics: {
+        onProtocolError: (ctx) => {
+          protocolErrors.push(ctx);
+        },
+      },
+    });
+
+    const exitPromise = Effect.runPromiseExit(
+      streamHandle.client.StreamAdd({ count: 1 }).pipe(Stream.runDrain),
+    );
+
+    await waitFor(() => activeStreamId.length > 0);
+
+    bridge.emitFrame({
+      type: "data",
+      streamId: activeStreamId,
+      payload: { value: "bad" },
+    });
+    bridge.emitFrame({
+      type: "data",
+      streamId: activeStreamId,
+      payload: { value: 1 },
+    });
+    bridge.emitFrame({
+      type: "data",
+      streamId: activeStreamId,
+      payload: { value: 2 },
+    });
+    bridge.emitFrame({
+      type: "data",
+      streamId: activeStreamId,
+      payload: { value: 3 },
+    });
+
+    const exit = await exitPromise;
+    expect(exit._tag).toBe("Failure");
+
+    const postCloseProtocolErrors = protocolErrors.filter(
+      (ctx) =>
+        isRecord(ctx) &&
+        isRecord(ctx.cause) &&
+        typeof ctx.cause.message === "string" &&
+        ctx.cause.message.includes("post-close"),
+    );
+
+    expect(postCloseProtocolErrors).toHaveLength(1);
+
+    streamHandle.dispose();
+  });
+
+  it("when sliding strategy is configured, then bounded stream remains consumable and cancellable", async () => {
+    const bridge = createScheduledFrameBridge({
+      totalFrames: 100_000,
+      framesPerTick: 8,
+    });
+
+    const handle = createStreamRpcClient(contract, {
+      invoke: bridge.invoke,
+      onStreamFrame: bridge.onStreamFrame,
+      streamBuffer: {
+        bufferSize: 4,
+        strategy: "sliding",
+      },
+    });
+
+    const seen: number[] = [];
+    await Effect.runPromise(
+      handle.client.StreamAdd({ count: 1 }).pipe(
+        Stream.take(12),
+        Stream.runForEach((chunk) =>
+          Effect.sleep("10 millis").pipe(
+            Effect.andThen(
+              Effect.sync(() => {
+                seen.push(chunk.value);
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(seen).toHaveLength(12);
+    expect(bridge.cancelCalls.length).toBeGreaterThan(0);
+
+    handle.dispose();
+  });
+
+  it("when bounded stream is disposed while active, then stream fails and cancellation is requested", async () => {
+    const bridge = createScheduledFrameBridge({
+      totalFrames: 10_000,
+      framesPerTick: 8,
+    });
+
+    const streamHandle = createStreamRpcClient(contract, {
+      invoke: bridge.invoke,
+      onStreamFrame: bridge.onStreamFrame,
+      streamBuffer: {
+        bufferSize: 4,
+        strategy: "dropping",
+      },
+    });
+
+    const exitPromise = Effect.runPromiseExit(
+      streamHandle.client.StreamAdd({ count: 1 }).pipe(
+        Stream.runForEach((chunk) =>
+          Effect.sleep("10 millis").pipe(
+            Effect.andThen(
+              Effect.sync(() => {
+                void chunk;
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await waitFor(() => bridge.startedStreamIds.length === 1);
+    streamHandle.dispose();
+
+    const exit = await exitPromise;
+    expect(exit._tag).toBe("Failure");
+    expect(bridge.cancelCalls).toHaveLength(1);
+  });
 });
 
 // Stream e2e edge cases
@@ -1651,5 +1961,54 @@ describe("kit stream wiring", () => {
     };
 
     expect(() => kit.renderer(bridgeWithoutStream)).toThrow(/bridge.onStreamFrame is missing/);
+  });
+
+  it("when kit stream buffer is configured, then renderer stream client uses that policy", async () => {
+    const totalFrames = 320;
+    const bridge = createScheduledFrameBridge({
+      totalFrames,
+      framesPerTick: 8,
+    });
+
+    const kit = createIpcKit({
+      contract,
+      streamBuffer: {
+        bufferSize: 4,
+        strategy: "dropping",
+      },
+    });
+    expect(kit.config.streamBuffer).toEqual({
+      bufferSize: 4,
+      strategy: "dropping",
+    });
+
+    const renderer = kit.renderer({
+      invoke: bridge.invoke,
+      subscribe: () => () => {},
+      onStreamFrame: bridge.onStreamFrame,
+    });
+
+    const seen: number[] = [];
+
+    await Effect.runPromise(
+      renderer.streamClient.StreamAdd({ count: 1 }).pipe(
+        Stream.take(12),
+        Stream.runForEach((chunk) =>
+          Effect.sleep("10 millis").pipe(
+            Effect.andThen(
+              Effect.sync(() => {
+                seen.push(chunk.value);
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(seen).toHaveLength(12);
+    expect(Math.max(...seen)).toBeLessThan(totalFrames);
+    expect(bridge.cancelCalls.length).toBeGreaterThan(0);
+
+    renderer.dispose();
   });
 });
