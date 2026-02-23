@@ -108,11 +108,22 @@ void Effect.runPromise(
 ```ts
 import { ipc } from "./shared-ipc.ts";
 
-const { expose } = await ipc.preload();
+const { expose } = ipc.preload();
 expose();
 ```
 
 This exposes one global by default: `window.api`.
+
+If your preload runtime is ESM-only and does not expose synchronous `require`,
+pass the imported Electron module explicitly:
+
+```ts
+import * as electron from "electron";
+import { ipc } from "./shared-ipc.ts";
+
+const { expose } = ipc.preload({ electronModule: electron });
+expose();
+```
 
 ### 4) Renderer
 

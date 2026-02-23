@@ -8,6 +8,11 @@ import type {
   RpcEventPayload,
 } from "./contract.ts";
 import { createEventPublisher, createRpcEndpoint } from "./main.ts";
+import {
+  createBridgeAdaptersFromBindings,
+  exposeIpcBridgeFromBindings,
+  resolveElectronRendererBindings,
+} from "./preload-bridge.ts";
 import { createEventSubscriber, createRpcClient, createStreamRpcClient } from "./renderer.ts";
 import {
   defaultChannelPrefix,
@@ -73,6 +78,11 @@ type IpcMainOptions<
   };
 };
 
+type IpcPreloadOptions = {
+  readonly global?: string;
+  readonly electronModule?: unknown;
+};
+
 export type IpcMainHandle<
   C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>,
 > = {
@@ -104,11 +114,11 @@ export type IpcKit<
     readonly streamBuffer: StreamBufferOptions;
   };
   readonly main: <R>(options: IpcMainOptions<C, R>) => IpcMainHandle<C>;
-  readonly preload: (options?: { readonly global?: string }) => Promise<{
+  readonly preload: (options?: IpcPreloadOptions) => {
     readonly global: string;
     readonly bridge: IpcBridge;
     readonly expose: () => void;
-  }>;
+  };
   readonly renderer: (bridge: IpcBridge) => {
     readonly client: RpcClient<C>;
     readonly events: EventSubscriber<C>;
@@ -116,6 +126,21 @@ export type IpcKit<
     readonly dispose: () => void;
   };
 };
+
+function loadElectronModule(electronModule: unknown): unknown {
+  if (electronModule !== undefined) {
+    return electronModule;
+  }
+
+  if (typeof require === "function") {
+    return require("electron");
+  }
+
+  throw new Error(
+    "ipc.preload() could not load Electron synchronously. " +
+      "In ESM preload files, pass it explicitly: ipc.preload({ electronModule: electron }).",
+  );
+}
 
 export function createIpcKit<
   const Methods extends ReadonlyArray<AnyMethod>,
@@ -239,10 +264,12 @@ export function createIpcKit<
     };
   };
 
-  const preload = async (preloadOptions?: { readonly global?: string }) => {
-    const { createBridgeAdapters, exposeIpcBridge } = await import("./preload.ts");
+  const preload = (preloadOptions?: IpcPreloadOptions) => {
+    const bindings = resolveElectronRendererBindings(
+      loadElectronModule(preloadOptions?.electronModule),
+    );
     const global = preloadOptions?.global ?? bridgeGlobal;
-    const bridge = createBridgeAdapters({
+    const bridge = createBridgeAdaptersFromBindings(bindings, {
       channelPrefix,
     });
 
@@ -250,7 +277,7 @@ export function createIpcKit<
       global,
       bridge,
       expose: () => {
-        exposeIpcBridge({
+        exposeIpcBridgeFromBindings(bindings, {
           global,
           channelPrefix,
         });

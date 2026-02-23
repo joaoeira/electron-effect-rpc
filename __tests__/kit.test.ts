@@ -1,9 +1,40 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, mock } from "bun:test";
 import * as S from "@effect/schema/Schema";
 import { Effect } from "effect";
 import * as Runtime from "effect/Runtime";
 import { createIpcKit, defineContract, event, rpc } from "../src/index.ts";
 import type { ChannelPrefix, IpcMainLike } from "../src/types.ts";
+
+const exposedGlobals: Record<string, Record<string, unknown>> = Object.create(null);
+const invokeCalls: Array<{ channel: string; payload: unknown }> = [];
+const onCalls: Array<{
+  channel: string;
+  handler: (event: unknown, payload: unknown) => void;
+}> = [];
+const removeCalls: Array<{
+  channel: string;
+  handler: (event: unknown, payload: unknown) => void;
+}> = [];
+
+mock.module("electron", () => ({
+  contextBridge: {
+    exposeInMainWorld: (name: string, value: Record<string, unknown>) => {
+      exposedGlobals[name] = value;
+    },
+  },
+  ipcRenderer: {
+    invoke: (channel: string, payload: unknown) => {
+      invokeCalls.push({ channel, payload });
+      return Promise.resolve({ ok: true });
+    },
+    on: (channel: string, handler: (event: unknown, payload: unknown) => void) => {
+      onCalls.push({ channel, handler });
+    },
+    removeListener: (channel: string, handler: (event: unknown, payload: unknown) => void) => {
+      removeCalls.push({ channel, handler });
+    },
+  },
+}));
 
 const waitFor = async (predicate: () => boolean, timeoutMs = 1000) => {
   const start = Date.now();
@@ -91,6 +122,123 @@ const createEventBusHarness = (prefix: ChannelPrefix = { rpc: "rpc/", event: "ev
 };
 
 describe("createIpcKit", () => {
+  it("when preload bridge is created from kit, then return value is synchronous and uses shared config", async () => {
+    invokeCalls.length = 0;
+    onCalls.length = 0;
+    removeCalls.length = 0;
+    for (const key of Object.keys(exposedGlobals)) {
+      delete exposedGlobals[key];
+    }
+
+    const Ping = rpc("Ping", S.Struct({}), S.Struct({ ok: S.Boolean }));
+    const Progress = event("Progress", S.Struct({ step: S.Number }));
+    const contract = defineContract({
+      methods: [Ping] as const,
+      events: [Progress] as const,
+    });
+
+    const kit = createIpcKit({
+      contract,
+      channelPrefix: {
+        rpc: "rpc-kit/",
+        event: "evt-kit/",
+      },
+      bridge: {
+        global: "bridgeKit",
+      },
+    });
+
+    const preload = kit.preload();
+    expect(preload).not.toBeInstanceOf(Promise);
+    expect(preload.global).toBe("bridgeKit");
+
+    preload.expose();
+
+    const invokeRaw = exposedGlobals.bridgeKit?.invoke;
+    const subscribeRaw = exposedGlobals.bridgeKit?.subscribe;
+    if (typeof invokeRaw !== "function" || typeof subscribeRaw !== "function") {
+      throw new Error("expected exposed preload bridge");
+    }
+
+    await invokeRaw("Ping", { ok: true });
+    const unsubscribe = subscribeRaw("Progress", () => {});
+    unsubscribe();
+
+    expect(invokeCalls).toEqual([{ channel: "rpc-kit/Ping", payload: { ok: true } }]);
+    expect(onCalls[0]?.channel).toBe("evt-kit/Progress");
+    expect(removeCalls[0]?.channel).toBe("evt-kit/Progress");
+  });
+
+  it("when electronModule is supplied, then kit preload uses supplied bindings", async () => {
+    const localExposedGlobals: Record<string, Record<string, unknown>> = Object.create(null);
+    const localInvokeCalls: Array<{ channel: string; payload: unknown }> = [];
+    const localOnCalls: Array<{
+      channel: string;
+      handler: (event: unknown, payload: unknown) => void;
+    }> = [];
+    const localRemoveCalls: Array<{
+      channel: string;
+      handler: (event: unknown, payload: unknown) => void;
+    }> = [];
+
+    const localElectronModule = {
+      contextBridge: {
+        exposeInMainWorld: (name: string, value: Record<string, unknown>) => {
+          localExposedGlobals[name] = value;
+        },
+      },
+      ipcRenderer: {
+        invoke: (channel: string, payload: unknown) => {
+          localInvokeCalls.push({ channel, payload });
+          return Promise.resolve({ ok: true });
+        },
+        on: (channel: string, handler: (event: unknown, payload: unknown) => void) => {
+          localOnCalls.push({ channel, handler });
+        },
+        removeListener: (channel: string, handler: (event: unknown, payload: unknown) => void) => {
+          localRemoveCalls.push({ channel, handler });
+        },
+      },
+    };
+
+    const Ping = rpc("Ping", S.Struct({}), S.Struct({ ok: S.Boolean }));
+    const Progress = event("Progress", S.Struct({ step: S.Number }));
+    const contract = defineContract({
+      methods: [Ping] as const,
+      events: [Progress] as const,
+    });
+
+    const kit = createIpcKit({
+      contract,
+      channelPrefix: {
+        rpc: "rpc-local/",
+        event: "evt-local/",
+      },
+    });
+
+    const preload = kit.preload({
+      global: "localApi",
+      electronModule: localElectronModule,
+    });
+    preload.expose();
+
+    const invokeRaw = localExposedGlobals.localApi?.invoke;
+    const subscribeRaw = localExposedGlobals.localApi?.subscribe;
+    if (typeof invokeRaw !== "function" || typeof subscribeRaw !== "function") {
+      throw new Error("expected exposed local preload bridge");
+    }
+
+    await invokeRaw("Ping", { from: "override" });
+    const unsubscribe = subscribeRaw("Progress", () => {});
+    unsubscribe();
+
+    expect(localInvokeCalls).toEqual([
+      { channel: "rpc-local/Ping", payload: { from: "override" } },
+    ]);
+    expect(localOnCalls[0]?.channel).toBe("evt-local/Progress");
+    expect(localRemoveCalls[0]?.channel).toBe("evt-local/Progress");
+  });
+
   it("when main and renderer are built from the same kit config, then rpc and events roundtrip end-to-end", async () => {
     const Ping = rpc("Ping", S.Struct({}), S.Struct({ ok: S.Boolean }));
     const Progress = event("Progress", S.Struct({ step: S.Number }));

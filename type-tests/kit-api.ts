@@ -71,6 +71,21 @@ const bridge = {
 };
 
 const { client, events } = kit.renderer(bridge);
+const preloadHandle = kit.preload();
+const preloadGlobal: string = preloadHandle.global;
+const preloadExpose: () => void = preloadHandle.expose;
+void preloadGlobal;
+void preloadExpose;
+
+const preloadWithElectronModule = kit.preload({
+  electronModule: {},
+});
+void preloadWithElectronModule;
+
+type AssertSync<T> = T extends Promise<unknown> ? never : T;
+const preloadReturnIsSync: AssertSync<ReturnType<typeof kit.preload>> = preloadHandle;
+void preloadReturnIsSync;
+
 const pingEffect: Fx.Effect<{ ok: boolean }, RpcDefectError> = client.Ping();
 const echoEffect: Fx.Effect<{ echoed: string }, RpcDefectError> = client.Echo({
   message: "hello",
