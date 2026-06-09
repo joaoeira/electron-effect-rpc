@@ -1,4 +1,4 @@
-import * as S from "@effect/schema/Schema";
+import * as S from "effect/Schema";
 import { Effect } from "effect";
 import { defineContract, event, rpc, type RpcError } from "../src/contract.ts";
 import {
@@ -178,3 +178,31 @@ void eventRoot;
 type RootModule = typeof import("../src/index.ts");
 // @ts-expect-error Low-level factories stay subpath-only.
 type _NoCreateRpcClientFromRoot = RootModule["createRpcClient"];
+
+// object_typed_requests_still_require_an_argument
+const ObjReq = rpc("ObjReq", S.Object, S.String);
+const objContract = defineContract({
+  methods: [ObjReq] as const,
+  events: [] as const,
+});
+const objClient = createRpcClient(objContract, { invoke });
+const objReqEffect: Effect.Effect<string, RpcDefectError> = objClient.ObjReq({ any: "thing" });
+void objReqEffect;
+// @ts-expect-error `object`-typed request must be provided.
+objClient.ObjReq();
+
+// implementations_receive_typed_handler_context
+const implementationsWithContext: Implementations<typeof contract> = {
+  EmptyReq: (_input, context) => Effect.succeed(String(context.sender?.id ?? -1)),
+  NeedsReq: ({ value }) => Effect.succeed(String(value)),
+  NullReq: () => Effect.succeed("ok"),
+  NoErr: () => Effect.succeed("ok"),
+  WithErr: () => Effect.fail(new AccessDeniedError({ message: "denied" })),
+};
+void implementationsWithContext;
+
+// event_subscriber_stream_payloads_are_typed
+import type * as StreamType from "effect/Stream";
+const progressStream: StreamType.Stream<{ readonly value: number; readonly label: string }> =
+  subscriber.stream(Progress);
+void progressStream;

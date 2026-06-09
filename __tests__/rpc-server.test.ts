@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import * as S from "@effect/schema/Schema";
+import * as S from "effect/Schema";
 import { Context, Effect } from "effect";
 import * as Runtime from "effect/Runtime";
 import { defineContract, rpc } from "../src/contract.ts";
@@ -882,5 +882,48 @@ describe("createRpcEndpoint", () => {
     endpoint.start();
     expect(() => endpoint.dispose()).toThrow(/remove failed/);
     expect(() => endpoint.start()).toThrow(/disposed/i);
+  });
+});
+
+describe("handler context", () => {
+  it("when a handler uses the context argument, then it receives the sender", async () => {
+    const { ipcMain, handlers } = createIpcMainStub();
+
+    const WhoAmI = rpc("WhoAmI", S.Struct({}), S.Struct({ senderId: S.Number }));
+    const senderContract = defineContract({
+      methods: [WhoAmI] as const,
+      events: [] as const,
+    });
+
+    const endpoint = createRpcEndpoint(
+      senderContract,
+      ipcMain,
+      {
+        WhoAmI: (_input, context) => Effect.succeed({ senderId: context.sender?.id ?? -1 }),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+      },
+    );
+
+    endpoint.start();
+
+    const handler = requireHandler(handlers, "rpc/WhoAmI");
+    const sender = { id: 42, isDestroyed: () => false, send: () => {} };
+
+    const withSender = await handler({ sender }, {});
+    expect(parseRpcResponseEnvelope(withSender)).toEqual({
+      type: "success",
+      data: { senderId: 42 },
+    });
+
+    // Transports without a sender surface null instead of failing
+    const withoutSender = await handler({}, {});
+    expect(parseRpcResponseEnvelope(withoutSender)).toEqual({
+      type: "success",
+      data: { senderId: -1 },
+    });
+
+    endpoint.dispose();
   });
 });

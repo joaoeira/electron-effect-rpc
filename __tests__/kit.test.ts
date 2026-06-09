@@ -1,5 +1,5 @@
 import { describe, expect, it, mock } from "bun:test";
-import * as S from "@effect/schema/Schema";
+import * as S from "effect/Schema";
 import { Effect } from "effect";
 import * as Runtime from "effect/Runtime";
 import { createIpcKit, defineContract, event, rpc } from "../src/index.ts";
@@ -122,6 +122,21 @@ const createEventBusHarness = (prefix: ChannelPrefix = { rpc: "rpc/", event: "ev
 };
 
 describe("createIpcKit", () => {
+  it("when rpc and event prefixes are identical, then createIpcKit throws", () => {
+    const Ping = rpc("Ping", S.Struct({}), S.Struct({ ok: S.Boolean }));
+    const contract = defineContract({
+      methods: [Ping] as const,
+      events: [] as const,
+    });
+
+    expect(() =>
+      createIpcKit({
+        contract,
+        channelPrefix: { rpc: "ipc/", event: "ipc/" },
+      }),
+    ).toThrow(/must differ/);
+  });
+
   it("when preload bridge is created from kit, then return value is synchronous and uses shared config", async () => {
     invokeCalls.length = 0;
     onCalls.length = 0;
@@ -360,5 +375,37 @@ describe("createIpcKit", () => {
     await waitFor(() => seen.length === 1);
 
     expect(seen).toEqual([1]);
+  });
+});
+
+describe("kit renderer diagnostics", () => {
+  it("when renderer diagnostics are provided, then rpc decode failures are reported", async () => {
+    const Ping = rpc("Ping", S.Struct({}), S.Struct({ ok: S.Boolean }));
+    const contract = defineContract({
+      methods: [Ping] as const,
+      events: [] as const,
+    });
+
+    const decodeFailures: Array<{ scope: string; name: string }> = [];
+
+    const renderer = createIpcKit({ contract }).renderer(
+      {
+        invoke: async () => ({ type: "success", data: { ok: "not-a-boolean" } }),
+        subscribe: () => () => {},
+      },
+      {
+        diagnostics: {
+          rpc: {
+            onDecodeFailure: (context) => {
+              decodeFailures.push({ scope: context.scope, name: context.name });
+            },
+          },
+        },
+      },
+    );
+
+    const exit = await Effect.runPromiseExit(renderer.client.Ping());
+    expect(exit._tag).toBe("Failure");
+    expect(decodeFailures).toEqual([{ scope: "rpc-response", name: "Ping" }]);
   });
 });

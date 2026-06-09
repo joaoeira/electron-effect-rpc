@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import * as S from "@effect/schema/Schema";
-import { Effect } from "effect";
+import * as S from "effect/Schema";
+import { Effect, Stream } from "effect";
 import { defineContract, event } from "../src/contract.ts";
 import { createEventPublisher } from "../src/main.ts";
 import { isRecord } from "../src/protocol.ts";
@@ -1028,5 +1028,43 @@ describe("createEventPublisher", () => {
     expect(decodeFailures).toHaveLength(1);
     expect(dropped).toHaveLength(1);
     expect(dropped[0]).toMatchObject({ reason: "encoding_failed" });
+  });
+});
+
+describe("EventSubscriber.stream", () => {
+  const Progress = event("Progress", S.Struct({ value: S.Number }));
+
+  const contract = defineContract({
+    methods: [] as const,
+    events: [Progress] as const,
+  });
+
+  it("when events arrive, then the stream yields decoded payloads and unsubscribes on close", async () => {
+    let listener: ((payload: unknown) => void) | undefined;
+    let unsubscribed = false;
+
+    const subscriber = createEventSubscriber(contract, {
+      subscribe: (_name, handler) => {
+        listener = handler;
+        return () => {
+          unsubscribed = true;
+        };
+      },
+    });
+
+    const collected = Effect.runPromise(
+      subscriber.stream(Progress).pipe(Stream.take(2), Stream.runCollect),
+    );
+
+    await waitFor(() => listener !== undefined);
+    listener?.({ value: 1 });
+    listener?.({ value: "bad" }); // skipped by safe decode
+    listener?.({ value: 2 });
+
+    const chunk = await collected;
+    expect([...chunk]).toEqual([{ value: 1 }, { value: 2 }]);
+
+    await waitFor(() => unsubscribed);
+    expect(unsubscribed).toBe(true);
   });
 });

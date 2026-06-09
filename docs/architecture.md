@@ -59,7 +59,11 @@ unchanged (no `on`/`removeListener` needed).
 On main, active streams are tracked in a map keyed by `streamId`. Each entry
 stores the Fiber reference and the sender's `webContents.id` so that cancel
 requests are authenticated. When the endpoint stops, all active Fibers are
-interrupted before handlers are removed. On the renderer, `Stream.asyncPush`
+interrupted before handlers are removed. A destroyed sender also terminates
+its streams: the per-chunk send interrupts the pipeline when the webContents
+is gone, and when the sender exposes the real Electron event emitter the
+endpoint interrupts the fiber immediately on `destroyed`, so handler fibers
+never outlive closed windows. On the renderer, `Stream.asyncPush`
 drives the consumer with an `addFinalizer` that cleans up the frame dispatcher
 and sends a cancel to main. The stream client has its own `dispose()` method
 that fails any active streams before removing the central frame listener.

@@ -43,12 +43,22 @@ export type {
   StreamRpcMethod,
 } from "./contract.ts";
 
+/**
+ * Per-request context passed as the second argument to handlers.
+ * Handlers that don't need it can simply omit the parameter.
+ */
+export type RpcHandlerContext = {
+  /** The webContents that sent the request, when the transport exposes it. */
+  readonly sender: WebContentsLike | null;
+};
+
 export type Implementations<
   C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>,
   R = never,
 > = {
   readonly [Name in C["methods"][number]["name"]]: (
     input: RpcInput<ExtractMethod<C["methods"], Name>>,
+    context: RpcHandlerContext,
   ) => Effect.Effect<
     RpcOutput<ExtractMethod<C["methods"], Name>>,
     RpcError<ExtractMethod<C["methods"], Name>>,
@@ -62,6 +72,7 @@ export type StreamImplementations<
 > = {
   readonly [Name in C["streamMethods"][number]["name"]]: (
     input: StreamInput<ExtractStreamMethod<C["streamMethods"], Name>>,
+    context: RpcHandlerContext,
   ) => Stream.Stream<
     StreamChunk<ExtractStreamMethod<C["streamMethods"], Name>>,
     StreamError<ExtractStreamMethod<C["streamMethods"], Name>>,
@@ -73,9 +84,25 @@ export type WebContentsLike = {
   readonly id: number;
   readonly isDestroyed: () => boolean;
   readonly send: (channel: string, payload: unknown) => void;
+  /**
+   * Optional EventEmitter surface (present on real Electron WebContents).
+   * When available, active stream fibers are interrupted as soon as the
+   * renderer is destroyed; otherwise termination happens on the next chunk.
+   */
+  readonly once?: (event: "destroyed", listener: () => void) => unknown;
+  readonly removeListener?: (event: "destroyed", listener: () => void) => unknown;
 };
 
-type IsEmptyObject<T> = T extends object ? (keyof T extends never ? true : false) : false;
+// True only for exactly `{}` (e.g. S.Struct({})). `string extends T`
+// distinguishes `{}` (accepts primitives) from `object` (does not), so
+// methods with an `object`-typed input still require an argument.
+type IsEmptyObject<T> = T extends object
+  ? keyof T extends never
+    ? string extends T
+      ? true
+      : false
+    : false
+  : false;
 
 export type RpcDefectCode =
   | "request_encoding_failed"
@@ -141,6 +168,20 @@ export const defaultChannelPrefix: ChannelPrefix = {
   rpc: "rpc/",
   event: "event/",
 };
+
+/**
+ * RPC and event prefixes must differ: with identical prefixes an event named
+ * like a method (or named "sf"/"stream-cancel") would collide with RPC and
+ * stream transport channels.
+ */
+export function assertValidChannelPrefix(prefix: ChannelPrefix): ChannelPrefix {
+  if (prefix.rpc === prefix.event) {
+    throw new Error(
+      `channelPrefix.rpc and channelPrefix.event must differ (both were "${prefix.rpc}").`,
+    );
+  }
+  return prefix;
+}
 
 export type DecodeFailureScope =
   | "rpc-request"
@@ -252,6 +293,11 @@ export type EventPublisherOptions = {
 export interface RpcEventPublisher<
   C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>,
 > {
+  /**
+   * Enqueue an event for delivery. Never fails: after `dispose()` the event
+   * is silently discarded, and delivery problems surface only through the
+   * diagnostics hooks and `stats()`.
+   */
   readonly publish: <E extends C["events"][number]>(
     event: E,
     payload: RpcEventPayload<E>,
@@ -260,6 +306,11 @@ export interface RpcEventPublisher<
   readonly stop: () => void;
   readonly dispose: () => void;
   readonly isRunning: () => boolean;
+  /**
+   * `dropped` counts failed deliveries, not whole events: an event that
+   * reaches two of three windows increments it once (per failed window),
+   * as do queue evictions and encoding failures.
+   */
   readonly stats: () => {
     readonly queued: number;
     readonly dropped: number;
@@ -288,6 +339,12 @@ export interface EventSubscriber<
     handler: (payload: RpcEventPayload<E>) => void,
   ) => () => void;
   readonly subscribeByName: (name: string, handler: (payload: unknown) => void) => () => void;
+  /**
+   * Effect-native subscription: a Stream of decoded payloads that
+   * subscribes when run and unsubscribes when its scope closes.
+   * Payloads that fail to decode are skipped (reported via diagnostics).
+   */
+  readonly stream: <E extends C["events"][number]>(event: E) => Stream.Stream<RpcEventPayload<E>>;
   readonly dispose: () => void;
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import * as S from "@effect/schema/Schema";
+import * as S from "effect/Schema";
 import { Cause, Effect, Stream } from "effect";
 import * as Runtime from "effect/Runtime";
 import { defineContract, rpc, streamRpc } from "../src/contract.ts";
@@ -355,6 +355,31 @@ describe("parseStreamFrame", () => {
 });
 
 describe("createRpcEndpoint with streamHandlers", () => {
+  it("when streamHandlers are provided but contract has no stream methods, then endpoint creation throws", () => {
+    const harness = createStreamHarness();
+    const noStreamContract = defineContract({
+      methods: [Ping] as const,
+      events: [] as const,
+    });
+
+    expect(() =>
+      createRpcEndpoint(
+        noStreamContract,
+        harness.ipcMain,
+        {
+          Ping: () => Effect.succeed({ ok: true }),
+        },
+        {
+          runtime: Runtime.defaultRuntime,
+          streamHandlers: {
+            // @ts-expect-error contract defines no stream methods
+            StreamAdd: () => Stream.empty,
+          },
+        },
+      ),
+    ).toThrow(/defines no stream methods/);
+  });
+
   it("when endpoint starts with stream handlers, then stream channels are registered", () => {
     const harness = createStreamHarness();
 
@@ -1037,6 +1062,116 @@ describe("main-side stream edge cases", () => {
       return frame?.type === "end" && frame.streamId === "destroy-me";
     });
     expect(endFrames.length).toBe(0);
+
+    endpoint.dispose();
+  });
+
+  it("when sender is destroyed mid-stream, then an infinite stream handler is terminated", async () => {
+    const harness = createStreamHarness();
+    let pulls = 0;
+
+    const endpoint = createRpcEndpoint(
+      contract,
+      harness.ipcMain,
+      {
+        Ping: () => Effect.succeed({ ok: true }),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+        streamHandlers: {
+          StreamAdd: () =>
+            Stream.repeatEffect(
+              Effect.sync(() => {
+                pulls += 1;
+                return { value: pulls };
+              }).pipe(Effect.delay("2 millis")),
+            ),
+          StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
+        },
+      },
+    );
+
+    endpoint.start();
+
+    await harness.invoke("stream/StreamAdd", {
+      data: { count: 1 },
+      streamId: "leak-check",
+    });
+
+    await waitFor(() => pulls > 2);
+
+    harness.setSenderDestroyed(true);
+
+    // Let the in-flight chunk hit the destroyed check and interrupt the fiber
+    await new Promise((r) => setTimeout(r, 100));
+    const pullsAfterSettle = pulls;
+    await new Promise((r) => setTimeout(r, 200));
+
+    // The source must stop being pulled (allow one in-flight chunk)
+    expect(pulls - pullsAfterSettle).toBeLessThanOrEqual(1);
+
+    // The active stream entry must be cleaned up
+    const cancelResult = await harness.invoke("stream-cancel", { streamId: "leak-check" });
+    expect(cancelResult).toEqual({ cancelled: false });
+
+    endpoint.dispose();
+  });
+
+  it("when sender emits destroyed, then an idle stream fiber is interrupted", async () => {
+    const harness = createStreamHarness();
+
+    // Emulate the EventEmitter surface of a real WebContents
+    const destroyedListeners = new Set<() => void>();
+    let destroyed = false;
+    const sender = {
+      id: 7,
+      isDestroyed: () => destroyed,
+      send: () => {},
+      once: (_event: "destroyed", listener: () => void) => {
+        destroyedListeners.add(listener);
+      },
+      removeListener: (_event: "destroyed", listener: () => void) => {
+        destroyedListeners.delete(listener);
+      },
+    };
+
+    const endpoint = createRpcEndpoint(
+      contract,
+      harness.ipcMain,
+      {
+        Ping: () => Effect.succeed({ ok: true }),
+      },
+      {
+        runtime: Runtime.defaultRuntime,
+        streamHandlers: {
+          // Never emits a chunk, so the per-chunk destroyed check never runs
+          StreamAdd: () => Stream.never,
+          StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
+        },
+      },
+    );
+
+    endpoint.start();
+
+    const handler = harness.handlers.get("rpc/stream/StreamAdd");
+    if (!handler) throw new Error("missing stream handler");
+    await handler({ sender }, { data: { count: 1 }, streamId: "idle-stream" });
+
+    expect(destroyedListeners.size).toBe(1);
+
+    destroyed = true;
+    for (const listener of [...destroyedListeners]) {
+      listener();
+    }
+
+    // Fiber interruption runs the finalizer, which removes the listener
+    await waitFor(() => destroyedListeners.size === 0);
+
+    // And the active stream entry is gone
+    const cancelHandler = harness.handlers.get("rpc/stream-cancel");
+    if (!cancelHandler) throw new Error("missing cancel handler");
+    const cancelResult = await cancelHandler({ sender }, { streamId: "idle-stream" });
+    expect(cancelResult).toEqual({ cancelled: false });
 
     endpoint.dispose();
   });
@@ -2007,7 +2142,8 @@ describe("kit stream wiring", () => {
 
     expect(seen).toHaveLength(12);
     expect(Math.max(...seen)).toBeLessThan(totalFrames);
-    expect(bridge.cancelCalls.length).toBeGreaterThan(0);
+    // Main already sent its end frame, so no cancel round-trip is needed
+    expect(bridge.cancelCalls.length).toBe(0);
 
     renderer.dispose();
   });

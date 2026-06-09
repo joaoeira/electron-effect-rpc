@@ -4,7 +4,6 @@
     "": {
       "name": "electron-effect-rpc",
       "devDependencies": {
-        "@effect/schema": "^0.69.0",
         "@types/node": "^22.0.0",
         "bun-types": "^1.1.0",
         "effect": "^3.11.0",
@@ -14,15 +13,12 @@
         "typescript": "^5.7.0",
       },
       "peerDependencies": {
-        "@effect/schema": ">=0.69.0",
-        "effect": ">=3.0.0",
+        "effect": ">=3.10.0",
         "electron": ">=28.0.0",
       },
     },
   },
   "packages": {
-    "@effect/schema": ["@effect/schema@0.69.3", "", { "dependencies": { "fast-check": "^3.20.0" }, "peerDependencies": { "effect": "^3.5.9" } }, "sha512-q2b3e2VUdkocsmyBWl1IhzHUm7+bnpIm5CL8dYDiqtN+MBugiTK8aFW8raOQa5K9c8HNooAaMjA04RfeM6/H+A=="],
-
     "@electron/get": ["@electron/get@2.0.3", "", { "dependencies": { "debug": "^4.1.1", "env-paths": "^2.2.0", "fs-extra": "^8.1.0", "got": "^11.8.5", "progress": "^2.0.3", "semver": "^6.2.0", "sumchecker": "^3.0.1" }, "optionalDependencies": { "global-agent": "^3.0.0" } }, "sha512-Qkzpg2s9GnVV2I2BjRksUi43U5e6+zaQMcjoJy0C+C5oxaKl+fmckGDQFtRpZpZV0NQekuZZ+tGz7EA9TVnQtQ=="],
 
     "@oxfmt/binding-android-arm-eabi": ["@oxfmt/binding-android-arm-eabi@0.34.0", "", { "os": "android", "cpu": "arm" }, "sha512-sqkqjh/Z38l+duOb1HtVqJTAj1grt2ttkobCopC/72+a4Xxz4xUgZPFyQ4HxrYMvyqO/YA0tvM1QbfOu70Gk1Q=="],

@@ -1,4 +1,4 @@
-import * as S from "@effect/schema/Schema";
+import * as S from "effect/Schema";
 import { Cause, Effect, Exit, Stream } from "effect";
 import {
   exitSchemaFor,
@@ -338,6 +338,18 @@ export function createEventSubscriber<
     return registerUnsubscribe(unsubscribe);
   };
 
+  const streamEvent = <E extends Events[number]>(event: E): Stream.Stream<RpcEventPayload<E>> =>
+    Stream.asyncPush<RpcEventPayload<E>>((emit) =>
+      Effect.acquireRelease(
+        Effect.sync(() =>
+          subscribeEvent(event, (payload) => {
+            emit.single(payload);
+          }),
+        ),
+        (unsubscribe) => Effect.sync(unsubscribe),
+      ),
+    );
+
   const subscribeByName = (name: string, handler: (payload: unknown) => void) => {
     const event = eventMap.get(name);
     if (!event) {
@@ -381,6 +393,7 @@ export function createEventSubscriber<
   return {
     subscribe: subscribeEvent,
     subscribeByName,
+    stream: streamEvent,
     dispose,
   };
 }
@@ -410,7 +423,7 @@ export function createStreamRpcClient<
     data: (payload: unknown) => void;
     end: () => void;
     error: (error: { tag: string; data: unknown }) => void;
-    defect: (message: string) => void;
+    defect: (message: string, fromServer?: boolean) => void;
   };
 
   const frameDispatcher = new Map<string, FrameHandler>();
@@ -452,7 +465,7 @@ export function createStreamRpcClient<
         frameDispatcher.delete(frame.streamId);
         break;
       case "defect":
-        handler.defect(frame.message);
+        handler.defect(frame.message, true);
         frameDispatcher.delete(frame.streamId);
         break;
     }
@@ -481,6 +494,10 @@ export function createStreamRpcClient<
         (emit) =>
           Effect.gen(function* () {
             const streamId = crypto.randomUUID();
+
+            // Once main has sent a terminal frame (end/error/defect) there is
+            // nothing left to cancel; the finalizer skips the cancel invoke.
+            let serverTerminated = false;
 
             // 1. Register in dispatch map BEFORE calling invoke
             frameDispatcher.set(streamId, {
@@ -521,8 +538,12 @@ export function createStreamRpcClient<
                   });
                 }
               },
-              end: () => emit.end(),
+              end: () => {
+                serverTerminated = true;
+                emit.end();
+              },
               error: (err) => {
+                serverTerminated = true;
                 if (!decodeTypedError) {
                   emit.fail(
                     rpcDefect(
@@ -554,7 +575,12 @@ export function createStreamRpcClient<
                   );
                 }
               },
-              defect: (message) => emit.fail(rpcDefect("remote_defect", message, undefined)),
+              defect: (message, fromServer = false) => {
+                if (fromServer) {
+                  serverTerminated = true;
+                }
+                emit.fail(rpcDefect("remote_defect", message, undefined));
+              },
             });
 
             // 2. Register cleanup finalizer
@@ -563,8 +589,12 @@ export function createStreamRpcClient<
                 frameDispatcher.delete(streamId);
               }).pipe(
                 Effect.andThen(
-                  Effect.tryPromise(() => invoke(`stream-cancel`, { streamId })).pipe(
-                    Effect.ignore,
+                  Effect.suspend(() =>
+                    serverTerminated
+                      ? Effect.void
+                      : Effect.tryPromise(() => invoke(`stream-cancel`, { streamId })).pipe(
+                          Effect.ignore,
+                        ),
                   ),
                 ),
               ),

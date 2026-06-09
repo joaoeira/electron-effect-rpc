@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import * as S from "@effect/schema/Schema";
+import * as S from "effect/Schema";
 import { Cause, Effect, Exit } from "effect";
 import { defineContract, exitSchemaFor, rpc } from "../src/contract.ts";
 import { isRecord } from "../src/protocol.ts";

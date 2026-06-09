@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import * as S from "@effect/schema/Schema";
+import * as S from "effect/Schema";
 import { Effect } from "effect";
 import * as Runtime from "effect/Runtime";
 import { defineContract, event, rpc } from "../src/contract.ts";

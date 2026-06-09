@@ -15,17 +15,20 @@ import {
 } from "./preload-bridge.ts";
 import { createEventSubscriber, createRpcClient, createStreamRpcClient } from "./renderer.ts";
 import {
+  assertValidChannelPrefix,
   defaultChannelPrefix,
   type ChannelPrefix,
   type EventDecodeMode,
   type EventPublisherDiagnostics,
   type EventSubscribe,
   type EventSubscriber,
+  type EventSubscriberDiagnostics,
   type IpcMainLike,
   type Implementations,
   type OnStreamFrame,
   type RendererWindowLike,
   type RpcClient,
+  type RpcClientDiagnostics,
   type RpcEndpoint,
   type RpcEndpointDiagnostics,
   type RpcEventPublisher,
@@ -37,6 +40,17 @@ import {
   type StreamBufferOptions,
 } from "./types.ts";
 
+/**
+ * Narrow surface the preload script exposes to the renderer.
+ *
+ * Implementations are responsible for applying the kit's channel prefixes:
+ * `invoke(method, payload)` must call `ipcRenderer.invoke(channelPrefix.rpc +
+ * method, payload)`, `subscribe(name, ...)` must listen on
+ * `channelPrefix.event + name`, and `onStreamFrame` must listen on
+ * `channelPrefix.rpc + "sf"`. The bridge produced by `ipc.preload()` does this
+ * for you; hand-written bridges that skip the prefixes fail with
+ * `invoke_failed` defects at runtime.
+ */
 export type IpcBridge = {
   readonly invoke: RpcInvoke;
   readonly subscribe: EventSubscribe;
@@ -83,6 +97,14 @@ type IpcPreloadOptions = {
   readonly electronModule?: unknown;
 };
 
+type IpcRendererOptions = {
+  readonly diagnostics?: {
+    readonly rpc?: RpcClientDiagnostics;
+    readonly events?: EventSubscriberDiagnostics;
+    readonly stream?: RpcClientDiagnostics;
+  };
+};
+
 export type IpcMainHandle<
   C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>,
 > = {
@@ -119,7 +141,10 @@ export type IpcKit<
     readonly bridge: IpcBridge;
     readonly expose: () => void;
   };
-  readonly renderer: (bridge: IpcBridge) => {
+  readonly renderer: (
+    bridge: IpcBridge,
+    options?: IpcRendererOptions,
+  ) => {
     readonly client: RpcClient<C>;
     readonly events: EventSubscriber<C>;
     readonly streamClient: StreamRpcClient<C>;
@@ -163,7 +188,7 @@ export function createIpcKit<
 
   const contract = options.contract;
   const channelPrefix = options.channelPrefix
-    ? { ...options.channelPrefix }
+    ? assertValidChannelPrefix({ ...options.channelPrefix })
     : { ...defaultChannelPrefix };
   const bridgeGlobal = options.bridge?.global ?? "api";
   const rpcDecodeMode = options.decode?.rpc ?? "envelope";
@@ -285,7 +310,7 @@ export function createIpcKit<
     };
   };
 
-  const renderer = (bridge: IpcBridge) => {
+  const renderer = (bridge: IpcBridge, rendererOptions?: IpcRendererOptions) => {
     const hasStreamMethods = (contract.streamMethods?.length ?? 0) > 0;
 
     if (hasStreamMethods && !bridge.onStreamFrame) {
@@ -302,6 +327,7 @@ export function createIpcKit<
         invoke: bridge.invoke,
         onStreamFrame: bridge.onStreamFrame,
         streamBuffer,
+        diagnostics: rendererOptions?.diagnostics?.stream,
       });
     }
 
@@ -312,10 +338,12 @@ export function createIpcKit<
       client: createRpcClient(contract, {
         invoke: bridge.invoke,
         rpcDecodeMode,
+        diagnostics: rendererOptions?.diagnostics?.rpc,
       }),
       events: createEventSubscriber(contract, {
         subscribe: bridge.subscribe,
         decodeMode: eventDecodeMode,
+        diagnostics: rendererOptions?.diagnostics?.events,
       }),
       streamClient: streamHandle?.client ?? emptyStreamClient,
       dispose: () => {

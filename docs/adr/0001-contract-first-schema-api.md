@@ -15,7 +15,7 @@ shapes so both compile-time and runtime behavior stay aligned.
 
 The library uses a contract-first model centered on `rpc`, `event`, and
 `defineContract` from `src/contract.ts`. Methods and events are declared once
-with `@effect/schema` definitions and consumed from both processes. Runtime
+with `effect/Schema` definitions and consumed from both processes. Runtime
 guards in `defineContract` reject duplicate method and event names to preserve a
 stable mapping from name to behavior.
 

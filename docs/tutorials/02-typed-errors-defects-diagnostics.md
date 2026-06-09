@@ -9,7 +9,7 @@ practice and how to instrument it safely.
 Define errors as tagged schemas and attach them to the RPC method.
 
 ```ts
-import * as S from "@effect/schema/Schema";
+import * as S from "effect/Schema";
 import { rpc } from "electron-effect-rpc/contract";
 
 export class AccessDeniedError extends S.TaggedError<AccessDeniedError>()("AccessDeniedError", {

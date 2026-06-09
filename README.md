@@ -1,6 +1,6 @@
 # electron-effect-rpc
 
-Typed IPC RPC for Electron, built on Effect and @effect/schema.
+Typed IPC RPC for Electron, built on Effect and `effect/Schema`.
 
 The ergonomic default is now a single shared `createIpcKit` configuration that
 you reuse in main, preload, and renderer code. Low-level subpath APIs still
@@ -24,12 +24,12 @@ ESM-capable build pipeline.
 
 - Electron with context isolation enabled.
 - ESM-capable bundling.
-- Peer dependencies: `effect`, `@effect/schema`, `electron`.
+- Peer dependencies: `effect` (>=3.10), `electron`.
 
 ## Installation
 
 ```sh
-bun add electron-effect-rpc effect @effect/schema
+bun add electron-effect-rpc effect
 ```
 
 ## Quickstart (Kit-First)
@@ -37,7 +37,7 @@ bun add electron-effect-rpc effect @effect/schema
 ### 1) Define contract and kit once
 
 ```ts
-import * as S from "@effect/schema/Schema";
+import * as S from "effect/Schema";
 import { createIpcKit, defineContract, event, rpc, streamRpc } from "electron-effect-rpc";
 
 export const GetAppVersion = rpc("GetAppVersion", S.Struct({}), S.Struct({ version: S.String }));
@@ -74,15 +74,22 @@ export const ipc = createIpcKit({
 ### 2) Main process
 
 ```ts
-import { app, ipcMain } from "electron";
+import path from "node:path";
+import { app, BrowserWindow, ipcMain } from "electron";
 import { Effect, Stream } from "effect";
 import * as Runtime from "effect/Runtime";
 import { ipc, WorkUnitProgress } from "./shared-ipc.ts";
+
+const mainWindow = new BrowserWindow({
+  webPreferences: { preload: path.join(import.meta.dirname, "preload.js") },
+});
 
 const mainRpc = ipc.main({
   ipcMain,
   handlers: {
     GetAppVersion: () => Effect.succeed({ version: app.getVersion() }),
+    // Handlers may take an optional second argument with request context:
+    // GetAppVersion: (_input, { sender }) => ...
   },
   streamHandlers: {
     StreamAiGeneration: ({ prompt }) =>
@@ -145,24 +152,43 @@ const unsubscribe = events.subscribe(WorkUnitProgress, (payload) => {
   console.log(payload.chunk);
 });
 
+// Or consume events as an Effect Stream (unsubscribes when the scope closes):
+await Effect.runPromise(
+  events
+    .stream(WorkUnitProgress)
+    .pipe(Stream.runForEach((payload) => Effect.sync(() => console.log(payload.chunk)))),
+);
+
 // later
 unsubscribe();
 dispose();
 ```
 
-### 5) Window typing
+Renderer-side diagnostics hooks are available through the second argument:
 
 ```ts
+const renderer = ipc.renderer(window.api, {
+  diagnostics: {
+    rpc: { onDecodeFailure: (ctx) => console.warn("rpc decode failure", ctx) },
+    events: { onDecodeFailure: (ctx) => console.warn("event decode failure", ctx) },
+  },
+});
+```
+
+### 5) Window typing
+
+Use the exported `IpcBridgeGlobal` helper so the declared shape stays in sync
+with what `ipc.preload()` exposes:
+
+```ts
+import type { IpcBridgeGlobal } from "electron-effect-rpc";
+
 declare global {
-  interface Window {
-    api: {
-      invoke: (method: string, payload: unknown) => Promise<unknown>;
-      subscribe: (name: string, handler: (payload: unknown) => void) => () => void;
-      onStreamFrame?: (listener: (frame: unknown) => void) => () => void;
-    };
-  }
+  interface Window extends IpcBridgeGlobal {}
 }
 ```
+
+For a custom global name, use `IpcBridgeGlobal<"myBridge">`.
 
 ## Error Model
 
@@ -177,39 +203,37 @@ which includes a stable `code` discriminator:
 `stream_invoke_failed`, `stream_handshake_invalid`,
 `stream_chunk_decode_failed`, and `stream_error_decode_failed`.
 
-## Breaking Changes
+Defect envelopes carry the main-process error message verbatim across IPC. If
+any window in your app loads remote or less-trusted content, treat that as
+information disclosure: catch and sanitize errors in your handlers rather than
+letting raw exceptions (paths, query fragments) become defects.
 
-`getWindow` was renamed to `getWindows` and now returns an array, enabling
-multi-window event fan-out. Empty array replaces `null` for "no windows."
+## Operational Notes
 
-Before:
+**Stream backpressure.** Stream frames are pushed from main as fast as the
+handler produces them; there is no acknowledgment across the IPC boundary. The
+renderer buffers with `bufferSize: "unbounded"` by default, which is lossless
+but means a fast producer with a slow consumer grows renderer memory. Bounded
+buffers (`dropping`/`sliding`) are lossy by design and, with current Effect
+`Stream.asyncPush` internals, can lose terminal signals under sustained
+pressure. Rate-limit fast producers in the handler (`Stream.throttle`,
+batching) rather than relying on a bounded renderer buffer.
 
-```ts
-getWindow: () => mainWindow,
-```
+**Unary RPC cancellation.** Interrupting the renderer-side Effect of a
+client call (e.g. via `Effect.timeout`) does not abort the main-side handler;
+the underlying `ipcRenderer.invoke` is not abortable. The handler runs to
+completion and its response is discarded. Streaming RPC does propagate
+cancellation to main. If a unary handler does expensive work, model it as a
+stream or build explicit cancellation into your contract.
 
-After:
+**Renderer teardown.** Main interrupts a stream's fiber when the renderer's
+`webContents` is destroyed (immediately when the real Electron `WebContents`
+event emitter is available, otherwise on the next chunk), so handler fibers do
+not outlive closed windows.
 
-```ts
-getWindows: () => [mainWindow],
-```
+## Migration Notes
 
-Renderer RPC methods now return `Effect.Effect` instead of `Promise`, and
-`IpcMainHandle.emit` was removed in favor of `publish`.
-
-Before:
-
-```ts
-const result = await client.GetAppVersion();
-await mainRpc.emit(WorkUnitProgress, payload);
-```
-
-After:
-
-```ts
-const result = await Effect.runPromise(client.GetAppVersion());
-await Effect.runPromise(mainRpc.publish(WorkUnitProgress, payload));
-```
+See [CHANGELOG.md](./CHANGELOG.md) for breaking changes between versions.
 
 ## Low-Level APIs (Still Supported)
 

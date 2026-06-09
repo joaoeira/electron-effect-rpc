@@ -11,7 +11,7 @@ Use `streamRpc()` instead of `rpc()`. The third argument is the chunk schema
 (each frame's payload), not a response schema.
 
 ```ts
-import * as S from "@effect/schema/Schema";
+import * as S from "effect/Schema";
 import { defineContract, rpc, streamRpc } from "electron-effect-rpc/contract";
 
 class AiError extends S.TaggedError<AiError>()("AiError", {

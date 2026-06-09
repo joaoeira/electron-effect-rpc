@@ -1,4 +1,4 @@
-import * as S from "@effect/schema/Schema";
+import * as S from "effect/Schema";
 
 export type SchemaNoContext = S.Schema.AnyNoContext;
 
@@ -8,7 +8,9 @@ export type NoError = typeof NoError;
 export type ErrorSchema = SchemaNoContext | NoError;
 
 export function isNoErrorSchema(schema: ErrorSchema): schema is NoError {
-  return schema === NoError;
+  // Also match by AST tag so a Never schema from a second copy of the
+  // schema package (npm dedup failure) is still treated as NoError.
+  return schema === NoError || schema.ast._tag === "NeverKeyword";
 }
 
 export interface RpcMethod<
@@ -45,33 +47,16 @@ export function rpc<const Name extends string>(
   return { name, req, res, err };
 }
 
-export interface RpcEvent<
-  Payload extends SchemaNoContext,
-  Context extends SchemaNoContext | null,
-  Name extends string = string,
-> {
+export interface RpcEvent<Payload extends SchemaNoContext, Name extends string = string> {
   readonly name: Name;
   readonly payload: Payload;
-  readonly context: Context;
 }
-
-export function event<
-  const Name extends string,
-  Payload extends SchemaNoContext,
-  Context extends SchemaNoContext,
->(name: Name, payload: Payload, context: Context): RpcEvent<Payload, Context, Name>;
 
 export function event<const Name extends string, Payload extends SchemaNoContext>(
   name: Name,
   payload: Payload,
-): RpcEvent<Payload, null, Name>;
-
-export function event<const Name extends string>(
-  name: Name,
-  payload: SchemaNoContext,
-  context?: SchemaNoContext | null,
-): RpcEvent<SchemaNoContext, SchemaNoContext | null, Name> {
-  return { name, payload, context: context ?? null };
+): RpcEvent<Payload, Name> {
+  return { name, payload };
 }
 
 export const exitSchemaFor = <
@@ -143,7 +128,7 @@ export type ExtractStreamMethod<
 
 export type AnyMethod = RpcMethod<string, SchemaNoContext, SchemaNoContext, ErrorSchema>;
 
-export type AnyEvent = RpcEvent<SchemaNoContext, SchemaNoContext | null, string>;
+export type AnyEvent = RpcEvent<SchemaNoContext, string>;
 
 export type RpcInput<M extends AnyMethod> = S.Schema.Type<M["req"]>;
 

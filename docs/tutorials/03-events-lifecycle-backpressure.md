@@ -76,9 +76,12 @@ or an indication of real delivery problems.
 - `safe` (default): decode failures are reported to diagnostics and handler is not called.
 - `strict`: decode failures throw immediately.
 
-Use `strict` in development and test-heavy surfaces where you want schema drift
-to fail fast. Use `safe` in production paths where you prefer telemetry and
-continued execution.
+Be aware of what `strict` means in practice: the throw happens inside the
+`ipcRenderer.on` callback, where no application code can catch it, so a decode
+failure becomes an uncaught exception in the renderer. That is the point —
+schema drift is impossible to ignore — but it will crash dev sessions, so use
+`strict` in development and test-heavy surfaces only. Use `safe` in production
+paths where you prefer telemetry and continued execution.
 
 ## Prefix consistency across process boundaries
 

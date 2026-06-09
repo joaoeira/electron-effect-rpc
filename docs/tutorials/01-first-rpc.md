@@ -12,7 +12,7 @@ event.
 Put your contract in a module imported by both main and renderer code.
 
 ```ts
-import * as S from "@effect/schema/Schema";
+import * as S from "effect/Schema";
 import { defineContract, event, rpc } from "electron-effect-rpc/contract";
 
 export const GetAppVersion = rpc("GetAppVersion", S.Struct({}), S.Struct({ version: S.String }));

@@ -1,4 +1,4 @@
-import * as S from "@effect/schema/Schema";
+import * as S from "effect/Schema";
 import { defineContract, event, rpc } from "../src/contract.ts";
 import { createEventSubscriber, createRpcClient } from "../src/renderer.ts";
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
-import * as S from "@effect/schema/Schema";
-import { defineContract, event, rpc } from "../src/contract.ts";
+import * as S from "effect/Schema";
+import { defineContract, event, isNoErrorSchema, NoError, rpc } from "../src/contract.ts";
 
 const EmptyRequest = S.Struct({});
 const EmptyResponse = S.Struct({});
@@ -8,6 +8,23 @@ const EmptyEventPayload = S.Struct({});
 
 const FooMethod = rpc("Foo", EmptyRequest, EmptyResponse);
 const BarEvent = event("Bar", EmptyEventPayload);
+
+describe("isNoErrorSchema", () => {
+  it("when given the NoError sentinel, then it matches", () => {
+    expect(isNoErrorSchema(NoError)).toBe(true);
+  });
+
+  it("when given a Never schema that is not the same instance, then it still matches", () => {
+    // Simulates a second copy of the schema package (npm dedup failure)
+    const foreignNever = S.make(S.Never.ast);
+    expect(foreignNever === NoError).toBe(false);
+    expect(isNoErrorSchema(foreignNever)).toBe(true);
+  });
+
+  it("when given a non-Never schema, then it does not match", () => {
+    expect(isNoErrorSchema(S.Struct({ message: S.String }))).toBe(false);
+  });
+});
 
 describe("defineContract", () => {
   it("when methods and events are both empty, then defineContract returns an empty contract", () => {

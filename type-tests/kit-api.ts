@@ -1,4 +1,4 @@
-import * as S from "@effect/schema/Schema";
+import * as S from "effect/Schema";
 import { Effect } from "effect";
 import type * as Fx from "effect/Effect";
 import * as Runtime from "effect/Runtime";

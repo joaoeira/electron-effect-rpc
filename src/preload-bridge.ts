@@ -1,5 +1,6 @@
 import { isRecord } from "./protocol.ts";
 import {
+  assertValidChannelPrefix,
   defaultChannelPrefix,
   type ChannelPrefix,
   type EventSubscribe,
@@ -85,7 +86,9 @@ export function createBridgeAdaptersFromBindings(
   bindings: ElectronRendererBindings,
   options?: BridgeAdaptersOptions,
 ): BridgeAdapters {
-  const channelPrefix = options?.channelPrefix ?? defaultChannelPrefix;
+  const channelPrefix = options?.channelPrefix
+    ? assertValidChannelPrefix(options.channelPrefix)
+    : defaultChannelPrefix;
   const { ipcRenderer } = bindings;
 
   const invoke: RpcInvoke = (method: string, payload: unknown) =>

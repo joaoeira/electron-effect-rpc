@@ -1,4 +1,4 @@
-import * as S from "@effect/schema/Schema";
+import * as S from "effect/Schema";
 import { Cause, Effect, Exit, FiberId, Stream } from "effect";
 import type * as FiberType from "effect/Fiber";
 import * as Runtime from "effect/Runtime";
@@ -27,6 +27,7 @@ import {
   type StreamDefectFrame,
 } from "./protocol.ts";
 import {
+  assertValidChannelPrefix,
   defaultChannelPrefix,
   type AnyEvent,
   type AnyMethod,
@@ -37,6 +38,7 @@ import {
   type RpcEndpoint,
   type RpcEndpointOptions,
   type RpcEventPublisher,
+  type RpcHandlerContext,
   type StreamImplementations,
   type WebContentsLike,
 } from "./types.ts";
@@ -44,7 +46,7 @@ import {
 type RpcListener = (event: unknown, payload: unknown) => Promise<RpcResponseEnvelope>;
 
 function resolveChannelPrefix(prefix: ChannelPrefix | undefined): ChannelPrefix {
-  return prefix ?? defaultChannelPrefix;
+  return prefix ? assertValidChannelPrefix(prefix) : defaultChannelPrefix;
 }
 
 function isWebContentsLike(value: unknown): value is WebContentsLike {
@@ -63,13 +65,19 @@ function extractSender(event: unknown): WebContentsLike | null {
 
 function isImplementation<M extends AnyMethod, R>(
   value: unknown,
-): value is (input: RpcInput<M>) => Effect.Effect<RpcOutput<M>, RpcError<M>, R> {
+): value is (
+  input: RpcInput<M>,
+  context: RpcHandlerContext,
+) => Effect.Effect<RpcOutput<M>, RpcError<M>, R> {
   return typeof value === "function";
 }
 
 function isStreamImplementation<M extends AnyStreamMethod, R>(
   value: unknown,
-): value is (input: StreamInput<M>) => Stream.Stream<StreamChunk<M>, StreamError<M>, R> {
+): value is (
+  input: StreamInput<M>,
+  context: RpcHandlerContext,
+) => Stream.Stream<StreamChunk<M>, StreamError<M>, R> {
   return typeof value === "function";
 }
 
@@ -124,7 +132,7 @@ export function createRpcEndpoint<
     listeners.set(
       channel,
       async function handleRpcRequest(
-        _event: unknown,
+        event: unknown,
         rawPayload: unknown,
       ): Promise<RpcResponseEnvelope> {
         let input: RpcInput<typeof method>;
@@ -143,7 +151,7 @@ export function createRpcEndpoint<
 
         let effect: Effect.Effect<RpcOutput<typeof method>, RpcError<typeof method>, R>;
         try {
-          effect = impl(input);
+          effect = impl(input, { sender: extractSender(event) });
         } catch (cause) {
           return toDefectEnvelope(cause, `RPC ${method.name} implementation threw`);
         }
@@ -214,6 +222,14 @@ export function createRpcEndpoint<
 
   if (streamMethods.length > 0 && !streamHandlerImpls) {
     throw new Error("Contract defines stream methods but no streamHandlers were provided.");
+  }
+
+  if (
+    streamMethods.length === 0 &&
+    streamHandlerImpls &&
+    Object.keys(streamHandlerImpls).length > 0
+  ) {
+    throw new Error("streamHandlers were provided but the contract defines no stream methods.");
   }
 
   if (streamMethods.length > 0 && streamHandlerImpls) {
@@ -297,7 +313,7 @@ export function createRpcEndpoint<
             R
           >;
           try {
-            handlerStream = impl(input);
+            handlerStream = impl(input, { sender });
           } catch (cause) {
             return toDefectEnvelope(cause, `Stream ${method.name} implementation threw`);
           }
@@ -317,11 +333,19 @@ export function createRpcEndpoint<
                       data: encodeFailure(failure.value),
                     },
                   };
-                } catch {
-                  // encoding failed, fall through to defect
+                } catch (encodeCause) {
+                  return {
+                    type: "defect",
+                    streamId,
+                    message: `Stream ${method.name} failure encoding failed: ${formatUnknown(encodeCause)}`,
+                  };
                 }
               }
-              return { type: "defect", streamId, message: formatUnknown(failure.value) };
+              return {
+                type: "defect",
+                streamId,
+                message: `Stream ${method.name} returned a typed failure, but method declares NoError: ${formatUnknown(failure.value)}`,
+              };
             }
             if (Cause.isInterruptedOnly(cause)) {
               return { type: "end", streamId };
@@ -335,15 +359,31 @@ export function createRpcEndpoint<
             };
           };
 
+          // Reserve entry BEFORE forking
+          const entry: ActiveStreamEntry = {
+            fiber: null,
+            senderId: sender.id,
+          };
+
+          const onSenderDestroyed = () => {
+            entry.fiber?.unsafeInterruptAsFork(FiberId.none);
+          };
+
           const streamEffect = handlerStream.pipe(
             Stream.mapEffect((chunk: StreamChunk<typeof method>) =>
-              Effect.try({
-                try: () => {
-                  if (sender.isDestroyed()) return;
-                  sender.send(sfChannel, { type: "data", streamId, payload: encodeChunk(chunk) });
-                },
-                catch: () => undefined,
-              }).pipe(Effect.ignore),
+              Effect.suspend(() => {
+                // A destroyed renderer can never consume more chunks:
+                // terminate the pipeline instead of draining the source.
+                if (sender.isDestroyed()) {
+                  return Effect.interrupt;
+                }
+
+                return Effect.try({
+                  try: () =>
+                    sender.send(sfChannel, { type: "data", streamId, payload: encodeChunk(chunk) }),
+                  catch: () => undefined,
+                }).pipe(Effect.ignore);
+              }),
             ),
             Stream.runDrain,
 
@@ -356,18 +396,29 @@ export function createRpcEndpoint<
             Effect.ensuring(
               Effect.sync(() => {
                 activeStreams.delete(streamId);
+                if (typeof sender.removeListener === "function") {
+                  sender.removeListener("destroyed", onSenderDestroyed);
+                }
               }),
             ),
           );
 
-          // Reserve entry BEFORE forking
-          const entry: ActiveStreamEntry = {
-            fiber: null,
-            senderId: sender.id,
-          };
           activeStreams.set(streamId, entry);
 
-          const fiber = runFork(streamEffect);
+          if (typeof sender.once === "function") {
+            sender.once("destroyed", onSenderDestroyed);
+          }
+
+          let fiber: FiberType.RuntimeFiber<void, unknown>;
+          try {
+            fiber = runFork(streamEffect);
+          } catch (cause) {
+            activeStreams.delete(streamId);
+            if (typeof sender.removeListener === "function") {
+              sender.removeListener("destroyed", onSenderDestroyed);
+            }
+            return toDefectEnvelope(cause, `Stream ${method.name} failed to start`);
+          }
           entry.fiber = fiber;
 
           const response: RpcResponseEnvelope = {
