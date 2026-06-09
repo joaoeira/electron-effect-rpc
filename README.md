@@ -1,28 +1,36 @@
 # electron-effect-rpc
 
-Typed IPC RPC for Electron, built on Effect and `effect/Schema`.
+[![npm](https://img.shields.io/npm/v/electron-effect-rpc)](https://www.npmjs.com/package/electron-effect-rpc)
 
-The ergonomic default is now a single shared `createIpcKit` configuration that
-you reuse in main, preload, and renderer code. Low-level subpath APIs still
-exist and remain fully supported.
+Typed, schema-validated IPC for Electron, built on [Effect](https://effect.website).
+
+Define your IPC surface once — methods, events, and streams, each described
+with `effect/Schema` — and get a fully typed client in the renderer, fully
+typed handlers in main, and runtime validation at every process boundary. No
+hand-rolled channel strings, no `any`-typed `invoke` calls, no drift between
+processes.
+
+The primary API is a single shared `createIpcKit` configuration reused across
+main, preload, and renderer. Low-level per-piece factories remain available as
+subpath imports.
 
 This package is ESM-only. It targets modern Electron runtimes and assumes an
 ESM-capable build pipeline.
 
 ## Features
 
-- Single shared contract for methods, events, and streaming RPC.
-- Single shared kit config to eliminate cross-process prefix drift.
-- End-to-end schema validation at IPC boundaries.
-- Effect-first renderer RPC with typed domain and defect channels.
-- Streaming RPC: handlers return `Stream.Stream`, clients consume `Stream.Stream`.
-- Effect-native main handlers with explicit runtime injection.
-- Explicit lifecycle handles and bounded event queue backpressure.
+- One contract for methods, events, and streaming RPC, shared by all three processes.
+- One kit config, so channel naming can never drift between processes.
+- Schema validation on every IPC crossing, in both directions.
+- Typed domain errors in the Effect error channel; transport problems as `RpcDefectError` with stable codes.
+- Streaming RPC: handlers return `Stream.Stream`, clients consume `Stream.Stream`, cancellation propagates.
+- Main handlers are Effects, run on a runtime you inject (so your services/layers are available).
+- Explicit lifecycle handles (`start`/`stop`/`dispose`) and bounded event queue backpressure.
 - Structured diagnostics hooks for decode/protocol/dispatch failures.
 
 ## Requirements
 
-- Electron with context isolation enabled.
+- Electron >= 28 with context isolation enabled.
 - ESM-capable bundling.
 - Peer dependencies: `effect` (>=3.10), `electron`.
 
@@ -63,11 +71,19 @@ const contract = defineContract({
   streamMethods: [StreamAiGeneration] as const,
 });
 
+export const ipc = createIpcKit({ contract });
+```
+
+`createIpcKit` accepts optional configuration; the values below are the
+defaults, so only set them to deviate:
+
+```ts
 export const ipc = createIpcKit({
   contract,
   channelPrefix: { rpc: "rpc/", event: "event/" },
   bridge: { global: "api" },
   decode: { rpc: "envelope", events: "safe" },
+  streamBuffer: { bufferSize: "unbounded" },
 });
 ```
 
@@ -100,6 +116,7 @@ const mainRpc = ipc.main({
 });
 
 mainRpc.start();
+app.on("will-quit", () => mainRpc.dispose());
 
 void Effect.runPromise(
   mainRpc.publish(WorkUnitProgress, {
@@ -192,16 +209,49 @@ For a custom global name, use `IpcBridgeGlobal<"myBridge">`.
 
 ## Error Model
 
-Domain failures are modeled with tagged error schemas and are surfaced in the
-Effect error channel as those same tagged values. Unexpected failures,
-transport defects, and protocol mismatches are surfaced as `RpcDefectError`,
-which includes a stable `code` discriminator:
-`request_encoding_failed`, `invoke_failed`,
-`success_payload_decoding_failed`, `failure_payload_decoding_failed`,
-`noerror_contract_violation`, `invalid_response_envelope`,
-`legacy_decode_failed`, `remote_defect`,
-`stream_invoke_failed`, `stream_handshake_invalid`,
-`stream_chunk_decode_failed`, and `stream_error_decode_failed`.
+A call site sees exactly two kinds of failure in the Effect error channel:
+
+- **Domain failures** — the tagged errors you declared in the contract's error
+  schema, decoded back into those same tagged values.
+- **`RpcDefectError`** — everything else: transport problems, schema
+  mismatches, and unexpected main-process exceptions. It is itself tagged
+  (`_tag: "RpcDefectError"`) and carries a stable `code` discriminator.
+
+```ts
+import { Effect } from "effect";
+
+const result = await Effect.runPromise(
+  client.DeleteWorkspace({ id }).pipe(
+    // a tagged error you declared in the contract
+    Effect.catchTag("AccessDeniedError", (e) =>
+      Effect.succeed({ deleted: false, reason: e.message }),
+    ),
+    // transport/contract problems
+    Effect.catchTag("RpcDefectError", (defect) =>
+      Effect.sync(() => log.error(defect.code, defect.message)).pipe(
+        Effect.andThen(Effect.fail(defect)),
+      ),
+    ),
+  ),
+);
+```
+
+`RpcDefectError.code` values:
+
+| Code                              | Meaning                                                             |
+| --------------------------------- | ------------------------------------------------------------------- |
+| `request_encoding_failed`         | Request payload failed schema encoding before leaving the renderer. |
+| `invoke_failed`                   | The underlying `ipcRenderer.invoke` rejected (transport failure).   |
+| `success_payload_decoding_failed` | Main's success payload failed response schema decoding.             |
+| `failure_payload_decoding_failed` | Main's typed failure payload failed error schema decoding.          |
+| `noerror_contract_violation`      | A failure arrived for a method that declares `NoError`.             |
+| `invalid_response_envelope`       | The response was not a valid envelope.                              |
+| `legacy_decode_failed`            | `dual` decode mode could not parse a legacy `Exit` payload.         |
+| `remote_defect`                   | The main-side handler died, threw, or was interrupted.              |
+| `stream_invoke_failed`            | The stream handshake invoke rejected (transport failure).           |
+| `stream_handshake_invalid`        | The stream handshake response had an unexpected shape.              |
+| `stream_chunk_decode_failed`      | A stream chunk failed schema decoding.                              |
+| `stream_error_decode_failed`      | A stream's typed error frame failed schema decoding.                |
 
 Defect envelopes carry the main-process error message verbatim across IPC. If
 any window in your app loads remote or less-trusted content, treat that as
@@ -239,12 +289,12 @@ See [CHANGELOG.md](./CHANGELOG.md) for breaking changes between versions.
 
 If you need direct control, keep using subpath entry points:
 
-- `electron-effect-rpc/contract`
-- `electron-effect-rpc/main`
-- `electron-effect-rpc/renderer`
-- `electron-effect-rpc/preload`
-- `electron-effect-rpc/types`
-- `electron-effect-rpc/testing`
+- `electron-effect-rpc/contract` — `rpc`, `event`, `streamRpc`, `defineContract`
+- `electron-effect-rpc/main` — `createRpcEndpoint`, `createEventPublisher`
+- `electron-effect-rpc/renderer` — `createRpcClient`, `createEventSubscriber`, `createStreamRpcClient`
+- `electron-effect-rpc/preload` — `exposeIpcBridge`, `createBridgeAdapters`
+- `electron-effect-rpc/types` — shared types, `RpcDefectError`, `assertValidChannelPrefix`
+- `electron-effect-rpc/testing` — `createInvokeStub`, `createDeferred` for unit-testing clients without Electron
 
 ## Root API Surface
 
@@ -256,7 +306,7 @@ The root entry point exports:
 
 Low-level factories like `createRpcClient` remain subpath-only by design.
 
-## Tutorials
+## Documentation
 
 For deeper walkthroughs and production guidance:
 
@@ -265,8 +315,9 @@ For deeper walkthroughs and production guidance:
 - [Typed Errors, Defects, and Diagnostics](./docs/tutorials/02-typed-errors-defects-diagnostics.md)
 - [Events, Lifecycle, and Backpressure](./docs/tutorials/03-events-lifecycle-backpressure.md)
 - [Streaming RPC](./docs/tutorials/04-streaming-rpc.md)
+- [Architecture overview](./docs/architecture.md) and [ADRs](./docs/adr/) for design rationale.
 
-## Conventions
+## Repository Conventions
 
 - Relative imports use `.ts` extensions.
 - Package imports are extensionless.
