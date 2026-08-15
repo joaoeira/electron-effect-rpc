@@ -5,21 +5,16 @@ import type {
   AnyEvent,
   AnyMethod,
   AnyStreamMethod,
-  ErrorSchema,
   ExtractMethod,
   ExtractStreamMethod,
   RpcContract,
   RpcError,
-  RpcEvent,
   RpcEventPayload,
   RpcInput,
-  RpcMethod,
   RpcOutput,
-  SchemaNoContext,
   StreamChunk,
   StreamError,
   StreamInput,
-  StreamRpcMethod,
 } from "./contract.ts";
 
 export type {
