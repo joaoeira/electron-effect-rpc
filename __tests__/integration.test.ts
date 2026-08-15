@@ -6,6 +6,7 @@ import { defineContract, event, rpc } from "../src/contract.ts";
 import { createEventPublisher, createRpcEndpoint } from "../src/main.ts";
 import { createEventSubscriber, createRpcClient, RpcDefectError } from "../src/renderer.ts";
 import type { ChannelPrefix, IpcMainLike } from "../src/types.ts";
+import type { IpcEncodedValue, IpcTestListener } from "./test-support.ts";
 
 class AccessDeniedError extends S.TaggedError<AccessDeniedError>()("AccessDeniedError", {
   message: S.String,
@@ -23,7 +24,7 @@ const waitFor = async (predicate: () => boolean, timeoutMs = 1000) => {
 };
 
 const createRpcHarness = (prefix: ChannelPrefix = { rpc: "rpc/", event: "event/" }) => {
-  const handlers = new Map<string, (event: unknown, payload: unknown) => unknown>();
+  const handlers = new Map<string, IpcTestListener>();
 
   const ipcMain: IpcMainLike = {
     handle: (channel, listener) => {
@@ -34,7 +35,7 @@ const createRpcHarness = (prefix: ChannelPrefix = { rpc: "rpc/", event: "event/"
     },
   };
 
-  const invoke = async (method: string, payload: unknown) => {
+  const invoke = async (method: string, payload: IpcEncodedValue) => {
     const handler = handlers.get(`${prefix.rpc}${method}`);
     if (!handler) {
       throw new Error(`Missing handler for method: ${method}`);
@@ -50,13 +51,13 @@ const createRpcHarness = (prefix: ChannelPrefix = { rpc: "rpc/", event: "event/"
 };
 
 const createEventBusHarness = (prefix: ChannelPrefix = { rpc: "rpc/", event: "event/" }) => {
-  const listeners = new Map<string, Set<(payload: unknown) => void>>();
-  const sent: Array<{ channel: string; payload: unknown }> = [];
+  const listeners = new Map<string, Set<(payload: IpcEncodedValue) => void>>();
+  const sent: Array<{ channel: string; payload: IpcEncodedValue }> = [];
 
   const window = {
     isDestroyed: () => false,
     webContents: {
-      send: (channel: string, payload: unknown) => {
+      send: (channel: string, payload: IpcEncodedValue) => {
         sent.push({ channel, payload });
         const channelListeners = listeners.get(channel);
         if (!channelListeners) {
@@ -69,9 +70,10 @@ const createEventBusHarness = (prefix: ChannelPrefix = { rpc: "rpc/", event: "ev
     },
   };
 
-  const subscribe = (name: string, handler: (payload: unknown) => void) => {
+  const subscribe = (name: string, handler: (payload: IpcEncodedValue) => void) => {
     const channel = `${prefix.event}${name}`;
-    const channelListeners = listeners.get(channel) ?? new Set<(payload: unknown) => void>();
+    const channelListeners =
+      listeners.get(channel) ?? new Set<(payload: IpcEncodedValue) => void>();
     channelListeners.add(handler);
     listeners.set(channel, channelListeners);
 

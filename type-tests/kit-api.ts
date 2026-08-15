@@ -2,8 +2,15 @@ import * as S from "effect/Schema";
 import { Effect } from "effect";
 import type * as Fx from "effect/Effect";
 import * as ContextModule from "effect/Context";
+import * as electron from "electron";
 import { createIpcKit, defineContract, event, rpc } from "../src/index.ts";
-import type { IpcMainLike, RpcDefectError } from "../src/types.ts";
+import type {
+  IpcMainLike,
+  IpcEncodedValue,
+  IpcInvokeEvent,
+  IpcInvokeResult,
+  RpcDefectError,
+} from "../src/types.ts";
 
 const Ping = rpc("Ping", S.Struct({}), S.Struct({ ok: S.Boolean }));
 const Echo = rpc("Echo", S.Struct({ message: S.String }), S.Struct({ echoed: S.String }));
@@ -78,9 +85,14 @@ void preloadGlobal;
 void preloadExpose;
 
 const preloadWithElectronModule = kit.preload({
-  electronModule: {},
+  electronModule: electron,
 });
 void preloadWithElectronModule;
+
+const encodedBigInt: IpcEncodedValue = 9007199254740993n;
+const encodedMap: IpcEncodedValue = new Map([["answer", 42n]]);
+void encodedBigInt;
+void encodedMap;
 
 type AssertSync<T> = T extends Promise<unknown> ? never : T;
 const preloadReturnIsSync: AssertSync<ReturnType<typeof kit.preload>> = preloadHandle;
@@ -105,7 +117,10 @@ events.subscribe(Progress, (payload) => {
   void wrong;
 });
 
-const handlers = new Map<string, (event: unknown, payload: unknown) => unknown>();
+const handlers = new Map<
+  string,
+  (event: IpcInvokeEvent, payload: IpcEncodedValue) => IpcInvokeResult
+>();
 const ipcMainStub: IpcMainLike = {
   handle: (channel, listener) => {
     handlers.set(channel, listener);

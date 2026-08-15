@@ -1,6 +1,7 @@
 import type * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import type * as Stream from "effect/Stream";
+import type { DiagnosticCause, IpcEncodedValue } from "./boundary.ts";
 import type {
   AnyEvent,
   AnyMethod,
@@ -78,14 +79,18 @@ export type StreamImplementations<
 export type WebContentsLike = {
   readonly id: number;
   readonly isDestroyed: () => boolean;
-  readonly send: (channel: string, payload: unknown) => void;
+  readonly send: (channel: string, payload: IpcEncodedValue) => void;
   /**
    * Optional EventEmitter surface (present on real Electron WebContents).
    * When available, active stream fibers are interrupted as soon as the
    * renderer is destroyed; otherwise termination happens on the next chunk.
    */
-  readonly once?: (event: "destroyed", listener: () => void) => unknown;
-  readonly removeListener?: (event: "destroyed", listener: () => void) => unknown;
+  readonly once?: (event: "destroyed", listener: () => void) => void;
+  readonly removeListener?: (event: "destroyed", listener: () => void) => void;
+};
+
+export type IpcInvokeEvent = {
+  readonly sender?: WebContentsLike;
 };
 
 // True only for exactly `{}` (e.g. S.Struct({})). `string extends T`
@@ -189,20 +194,20 @@ export type DecodeFailureScope =
 export type DecodeFailureContext = {
   readonly scope: DecodeFailureScope;
   readonly name: string;
-  readonly payload: unknown;
-  readonly cause: unknown;
+  readonly payload: DiagnosticCause;
+  readonly cause: DiagnosticCause;
 };
 
 export type ProtocolErrorContext = {
   readonly method: string;
-  readonly response: unknown;
-  readonly cause: unknown;
+  readonly response: DiagnosticCause;
+  readonly cause: DiagnosticCause;
 };
 
 export type DispatchFailureContext = {
   readonly event: string;
-  readonly payload: unknown;
-  readonly cause: unknown;
+  readonly payload: DiagnosticCause;
+  readonly cause: DiagnosticCause;
 };
 
 export type DroppedEventReason =
@@ -213,13 +218,13 @@ export type DroppedEventReason =
 
 export type DroppedEventContext = {
   readonly event: string;
-  readonly payload: unknown;
+  readonly payload: DiagnosticCause;
   readonly reason: DroppedEventReason;
   readonly queued: number;
   readonly dropped: number;
 };
 
-export type RpcInvoke = (method: string, payload: unknown) => Promise<unknown>;
+export type RpcInvoke = (method: string, payload: IpcEncodedValue) => Promise<IpcEncodedValue>;
 
 export type RpcResponseDecodeMode = "envelope" | "dual";
 
@@ -239,12 +244,14 @@ export type RpcEndpointDiagnostics = {
   readonly onProtocolError?: (context: ProtocolErrorContext) => void;
 };
 
+export type IpcInvokeResult = IpcEncodedValue | Promise<IpcEncodedValue>;
+
 export type IpcMainLike = {
   readonly handle: (
     channel: string,
-    listener: (event: unknown, payload: unknown) => unknown,
-  ) => unknown;
-  readonly removeHandler: (channel: string) => unknown;
+    listener: (event: IpcInvokeEvent, payload: IpcEncodedValue) => IpcInvokeResult,
+  ) => void;
+  readonly removeHandler: (channel: string) => void;
 };
 
 export interface RpcEndpoint {
@@ -274,7 +281,7 @@ export type EventPublisherDiagnostics = {
 export type RendererWindowLike = {
   readonly isDestroyed: () => boolean;
   readonly webContents: {
-    readonly send: (channel: string, payload: unknown) => void;
+    readonly send: (channel: string, payload: IpcEncodedValue) => void;
   };
 };
 
@@ -306,15 +313,20 @@ export interface RpcEventPublisher<
    * reaches two of three windows increments it once (per failed window),
    * as do queue evictions and encoding failures.
    */
-  readonly stats: () => {
-    readonly queued: number;
-    readonly dropped: number;
-  };
+  readonly stats: () => EventPublisherStats;
 }
 
 export type EventDecodeMode = "safe" | "strict";
 
-export type EventSubscribe = (name: string, handler: (payload: unknown) => void) => () => void;
+export type EventPublisherStats = {
+  readonly queued: number;
+  readonly dropped: number;
+};
+
+export type EventSubscribe = (
+  name: string,
+  handler: (payload: IpcEncodedValue) => void,
+) => () => void;
 
 export type EventSubscriberDiagnostics = {
   readonly onDecodeFailure?: (context: DecodeFailureContext) => void;
@@ -333,7 +345,10 @@ export interface EventSubscriber<
     event: E,
     handler: (payload: RpcEventPayload<E>) => void,
   ) => () => void;
-  readonly subscribeByName: (name: string, handler: (payload: unknown) => void) => () => void;
+  readonly subscribeByName: (
+    name: string,
+    handler: (payload: IpcEncodedValue) => void,
+  ) => () => void;
   /**
    * Effect-native subscription: a Stream of decoded payloads that
    * subscribes when run and unsubscribes when its scope closes.
@@ -343,7 +358,7 @@ export interface EventSubscriber<
   readonly dispose: () => void;
 }
 
-export type OnStreamFrame = (listener: (frame: unknown) => void) => () => void;
+export type OnStreamFrame = (listener: (frame: IpcEncodedValue) => void) => () => void;
 
 /**
  * Stream chunk buffering policy in the renderer.
@@ -372,5 +387,7 @@ export interface StreamRpcClientHandle<
   readonly client: StreamRpcClient<C>;
   readonly dispose: () => void;
 }
+
+export type { DiagnosticCause, IpcEncodedRecord, IpcEncodedValue } from "./boundary.ts";
 
 export type { IpcBridge, IpcBridgeGlobal, IpcKit, IpcKitOptions, IpcMainHandle } from "./kit.ts";

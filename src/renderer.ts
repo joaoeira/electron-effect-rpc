@@ -1,6 +1,12 @@
 import * as S from "effect/Schema";
 import { Cause, Effect, Exit, Queue, Result, Stream } from "effect";
 import {
+  isRecord,
+  toDiagnosticCause,
+  type DiagnosticCause,
+  type IpcEncodedValue,
+} from "./boundary.ts";
+import {
   exitSchemaFor,
   isNoErrorSchema,
   type AnyStreamMethod,
@@ -14,7 +20,6 @@ import {
 import {
   extractStreamIdFromRaw,
   formatUnknown,
-  isRecord,
   parseRpcResponseEnvelope,
   parseStreamFrame,
   safelyCall,
@@ -60,11 +65,17 @@ type MutableRpcClient<
   -readonly [Name in keyof RpcClient<C>]: RpcClient<C>[Name];
 };
 
-function rpcDefect(code: RpcDefectError["code"], message: string, cause: unknown): RpcDefectError {
+function emptyRpcClient<
+  C extends RpcContract<readonly AnyMethod[], readonly AnyEvent[], readonly AnyStreamMethod[]>,
+>(): MutableRpcClient<C> {
+  return Object.create(null);
+}
+
+function rpcDefect<T>(code: RpcDefectError["code"], message: string, cause: T): RpcDefectError {
   return new RpcDefectError(code, message, cause);
 }
 
-function decodeNonEmptyError(schema: import("./contract.ts").ErrorSchema, data: unknown) {
+function decodeNonEmptyError(schema: import("./contract.ts").ErrorSchema, data: IpcEncodedValue) {
   if (isNoErrorSchema(schema)) {
     throw new Error("unreachable: caller must check isNoErrorSchema first");
   }
@@ -73,7 +84,7 @@ function decodeNonEmptyError(schema: import("./contract.ts").ErrorSchema, data: 
 
 function decodeLegacyExit<M extends AnyMethod>(
   method: M,
-  raw: unknown,
+  raw: IpcEncodedValue,
 ): Effect.Effect<RpcOutput<M>, RpcMethodError<M>> {
   return Effect.try({
     try: () => S.decodeUnknownSync(exitSchemaFor(method))(raw),
@@ -133,7 +144,7 @@ export function createRpcClient<
               scope: "rpc-response",
               name: method.name,
               payload: envelope.data,
-              cause,
+              cause: toDiagnosticCause(cause),
             });
 
             return rpcDefect(
@@ -162,7 +173,7 @@ export function createRpcClient<
               scope: "rpc-response",
               name: method.name,
               payload: envelope.error,
-              cause,
+              cause: toDiagnosticCause(cause),
             });
 
             return rpcDefect(
@@ -188,8 +199,8 @@ export function createRpcClient<
         safelyCall(diagnostics?.onDecodeFailure, {
           scope: "rpc-request",
           name: method.name,
-          payload: input,
-          cause,
+          payload: toDiagnosticCause(input),
+          cause: toDiagnosticCause(cause),
         });
 
         return rpcDefect(
@@ -206,7 +217,7 @@ export function createRpcClient<
             safelyCall(diagnostics?.onProtocolError, {
               method: method.name,
               response: undefined,
-              cause,
+              cause: toDiagnosticCause(cause),
             });
 
             return rpcDefect(
@@ -231,7 +242,7 @@ export function createRpcClient<
                   safelyCall(diagnostics?.onProtocolError, {
                     method: method.name,
                     response: raw,
-                    cause,
+                    cause: toDiagnosticCause(cause),
                   }),
                 );
               }
@@ -249,15 +260,14 @@ export function createRpcClient<
         safelyCall(diagnostics?.onProtocolError, {
           method: method.name,
           response: raw,
-          cause,
+          cause: toDiagnosticCause(cause),
         });
 
         return Effect.fail(cause);
       }),
     );
 
-  const client: MutableRpcClient<RpcContract<Methods, Events, StreamMethods>> = Object.create(null);
-  const clientRecord: Record<string, unknown> = client;
+  const client = emptyRpcClient<RpcContract<Methods, Events, StreamMethods>>();
 
   for (const method of contract.methods) {
     const caller: RpcCaller<typeof method> = (...args: [RpcInput<typeof method>?]) => {
@@ -265,7 +275,7 @@ export function createRpcClient<
       return call(method, payload);
     };
 
-    clientRecord[method.name] = caller;
+    Object.assign(client, { [method.name]: caller });
   }
 
   return client;
@@ -274,8 +284,8 @@ export function createRpcClient<
 function reportDecodeFailure(
   mode: EventDecodeMode,
   eventName: string,
-  payload: unknown,
-  cause: unknown,
+  payload: IpcEncodedValue,
+  cause: DiagnosticCause,
   options?: EventSubscriberOptions,
 ): void {
   safelyCall(options?.diagnostics?.onDecodeFailure, {
@@ -328,7 +338,7 @@ export function createEventSubscriber<
       try {
         decoded = decoder(payload);
       } catch (cause) {
-        reportDecodeFailure(mode, event.name, payload, cause, options);
+        reportDecodeFailure(mode, event.name, payload, toDiagnosticCause(cause), options);
         return;
       }
 
@@ -350,7 +360,7 @@ export function createEventSubscriber<
       ),
     );
 
-  const subscribeByName = (name: string, handler: (payload: unknown) => void) => {
+  const subscribeByName = (name: string, handler: (payload: IpcEncodedValue) => void) => {
     const event = eventMap.get(name);
     if (!event) {
       throw new Error(`Unknown event: ${name}`);
@@ -358,11 +368,11 @@ export function createEventSubscriber<
 
     const decoder = S.decodeUnknownSync(event.payload);
     const unsubscribe = subscribe(name, (payload) => {
-      let decoded: unknown;
+      let decoded: IpcEncodedValue;
       try {
         decoded = decoder(payload);
       } catch (cause) {
-        reportDecodeFailure(mode, name, payload, cause, options);
+        reportDecodeFailure(mode, name, payload, toDiagnosticCause(cause), options);
         return;
       }
 
@@ -398,7 +408,7 @@ export function createEventSubscriber<
   };
 }
 
-function isStreamStartedResponse(value: unknown): boolean {
+function isStreamStartedResponse<T>(value: T): boolean {
   if (!isRecord(value)) return false;
   if (value.type === "success" && isRecord(value.data)) {
     return value.data.type === "stream_started";
@@ -420,16 +430,19 @@ export function createStreamRpcClient<
   const streamBuffer = options.streamBuffer ?? { bufferSize: "unbounded" as const };
 
   type FrameHandler = {
-    data: (payload: unknown) => void;
+    data: (payload: IpcEncodedValue) => void;
     end: () => void;
-    error: (error: { tag: string; data: unknown }) => void;
+    error: (error: { tag: string; data: IpcEncodedValue }) => void;
     defect: (message: string, fromServer?: boolean) => void;
   };
 
   const frameDispatcher = new Map<string, FrameHandler>();
-  const recentlyClosedStreams = new Map<string, (response: unknown) => void>();
+  const recentlyClosedStreams = new Map<string, (response: IpcEncodedValue) => void>();
 
-  const rememberRecentlyClosed = (streamId: string, report: (response: unknown) => void): void => {
+  const rememberRecentlyClosed = (
+    streamId: string,
+    report: (response: IpcEncodedValue) => void,
+  ): void => {
     recentlyClosedStreams.set(streamId, report);
     queueMicrotask(() => {
       if (recentlyClosedStreams.get(streamId) === report) {
@@ -439,7 +452,7 @@ export function createStreamRpcClient<
   };
 
   // Set up central frame listener
-  const centralCleanup = onStreamFrame((raw: unknown) => {
+  const centralCleanup = onStreamFrame((raw: IpcEncodedValue) => {
     const frame = parseStreamFrame(raw);
     if (!frame) {
       // Best-effort: extract streamId from malformed frame to fail the active stream
@@ -500,8 +513,11 @@ export function createStreamRpcClient<
     >]: StreamRpcClient<RpcContract<Methods, Events, StreamMethods>>[Name];
   };
 
-  const client: MutableStreamRpcClient = Object.create(null);
-  const clientRecord: Record<string, unknown> = client;
+  function emptyStreamRpcClient(): MutableStreamRpcClient {
+    return Object.create(null);
+  }
+
+  const client = emptyStreamRpcClient();
 
   for (const method of streamMethods) {
     const decodeChunk = S.decodeUnknownSync(method.chunk);
@@ -516,7 +532,7 @@ export function createStreamRpcClient<
           let queueClosed = false;
           let postCloseReported = false;
 
-          const reportPostClose = (response: unknown): void => {
+          const reportPostClose = (response: IpcEncodedValue): void => {
             if (postCloseReported) return;
             postCloseReported = true;
             safelyCall(diagnostics?.onProtocolError, {
@@ -558,14 +574,14 @@ export function createStreamRpcClient<
                     scope: "stream-chunk",
                     name: method.name,
                     payload: rawPayload,
-                    cause,
+                    cause: toDiagnosticCause(cause),
                   };
                   safelyCall(diagnostics?.onDecodeFailure, context);
                   failQueue(
                     rpcDefect(
                       "stream_chunk_decode_failed",
                       `Stream ${method.name} chunk decode failed: ${formatUnknown(cause)}`,
-                      cause,
+                      toDiagnosticCause(cause),
                     ),
                   );
                   return;
@@ -603,14 +619,14 @@ export function createStreamRpcClient<
                     scope: "stream-error",
                     name: method.name,
                     payload: err,
-                    cause,
+                    cause: toDiagnosticCause(cause),
                   };
                   safelyCall(diagnostics?.onDecodeFailure, errContext);
                   failQueue(
                     rpcDefect(
                       "stream_error_decode_failed",
                       `Stream ${method.name} error decode failed: ${formatUnknown(cause)}`,
-                      cause,
+                      toDiagnosticCause(cause),
                     ),
                   );
                 }
@@ -700,7 +716,7 @@ export function createStreamRpcClient<
       );
     };
 
-    clientRecord[method.name] = caller;
+    Object.assign(client, { [method.name]: caller });
   }
 
   function dispose(): void {

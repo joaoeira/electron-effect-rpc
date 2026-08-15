@@ -10,7 +10,13 @@ import {
 } from "../src/index.ts";
 import { createEventPublisher } from "../src/main.ts";
 import { createEventSubscriber, createRpcClient } from "../src/renderer.ts";
-import type { Implementations, RpcClient, RpcDefectError, RpcMethodError } from "../src/types.ts";
+import type {
+  Implementations,
+  IpcEncodedValue,
+  RpcClient,
+  RpcDefectError,
+  RpcMethodError,
+} from "../src/types.ts";
 import type {
   IpcBridge,
   IpcBridgeGlobal,
@@ -35,7 +41,7 @@ const contract = defineContract({
   events: [Progress] as const,
 });
 
-const invoke = async (_method: string, _payload: unknown) =>
+const invoke = async (_method: string, _payload: IpcEncodedValue) =>
   ({ type: "success", data: "ok" }) as const;
 const client = createRpcClient(contract, { invoke });
 

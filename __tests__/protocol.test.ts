@@ -1,7 +1,9 @@
 import { describe, expect, it } from "bun:test";
+import { toDiagnosticCause } from "../src/boundary.ts";
 import {
   extractErrorTag,
   parseRpcResponseEnvelope,
+  parseStreamFrame,
   safelyCall,
   toDefectEnvelope,
 } from "../src/protocol.ts";
@@ -17,6 +19,46 @@ describe("protocol", () => {
       type: "success",
       data: { ok: true },
     });
+  });
+
+  it("when an envelope carries a BigInt payload, then parser preserves the structured-clone value", () => {
+    const envelope = parseRpcResponseEnvelope({
+      type: "success",
+      data: 9007199254740993n,
+    });
+
+    expect(envelope).toEqual({
+      type: "success",
+      data: 9007199254740993n,
+    });
+  });
+
+  it("when a stream frame carries a BigInt payload, then parser preserves the structured-clone value", () => {
+    const frame = parseStreamFrame({
+      type: "data",
+      streamId: "bigint-stream",
+      payload: 9007199254740993n,
+    });
+
+    expect(frame).toEqual({
+      type: "data",
+      streamId: "bigint-stream",
+      payload: 9007199254740993n,
+    });
+  });
+
+  it("when an envelope carries a cyclic payload, then parsing and diagnostics remain safe", () => {
+    type CyclicPayload = { self?: CyclicPayload };
+    const payload: CyclicPayload = {};
+    payload.self = payload;
+
+    const envelope = parseRpcResponseEnvelope({ type: "success", data: payload });
+
+    expect(envelope?.type).toBe("success");
+    if (envelope?.type === "success") {
+      expect(envelope.data).toBe(payload);
+    }
+    expect(toDiagnosticCause(payload)).toBe(payload);
   });
 
   it("when a failure envelope has the required shape, then parser returns a failure envelope", () => {

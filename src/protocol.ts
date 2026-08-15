@@ -1,38 +1,41 @@
+import * as S from "effect/Schema";
+import {
+  formatUnknown,
+  isRecord,
+  isStringValue,
+  type IpcEncodedRecord,
+  type IpcEncodedValue,
+} from "./boundary.ts";
+
 export type RpcSuccessEnvelope = {
   readonly type: "success";
-  readonly data: unknown;
+  readonly data: IpcEncodedValue;
 };
 
 export type RpcFailureEnvelope = {
   readonly type: "failure";
   readonly error: {
     readonly tag: string;
-    readonly data: unknown;
+    readonly data: IpcEncodedValue;
   };
 };
 
 export type RpcDefectEnvelope = {
   readonly type: "defect";
   readonly message: string;
-  readonly cause?: unknown;
+  readonly cause?: IpcEncodedValue;
 };
 
 export type RpcResponseEnvelope = RpcSuccessEnvelope | RpcFailureEnvelope | RpcDefectEnvelope;
 
-function hasOwn(record: Record<string, unknown>, key: string): boolean {
-  return Object.prototype.hasOwnProperty.call(record, key);
-}
+const TaggedValue = S.Struct({
+  _tag: S.String,
+});
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
+export { formatUnknown, isRecord, isStringValue } from "./boundary.ts";
 
-export function formatUnknown(value: unknown): string {
-  return value instanceof Error ? value.message : String(value);
-}
-
-export function extractErrorTag(error: unknown): string {
-  if (isRecord(error) && typeof error._tag === "string") {
+export function extractErrorTag<T>(error: T): string {
+  if (S.is(TaggedValue)(error)) {
     return error._tag;
   }
 
@@ -43,7 +46,7 @@ export function extractErrorTag(error: unknown): string {
   return "RpcError";
 }
 
-export function toDefectEnvelope(cause: unknown, prefix?: string): RpcDefectEnvelope {
+export function toDefectEnvelope<T>(cause: T, prefix?: string): RpcDefectEnvelope {
   const causeText = formatUnknown(cause);
   return {
     type: "defect",
@@ -67,7 +70,7 @@ export function safelyCall<T>(callback: ((context: T) => void) | undefined, cont
 export type StreamDataFrame = {
   readonly type: "data";
   readonly streamId: string;
-  readonly payload: unknown;
+  readonly payload: IpcEncodedValue;
 };
 
 export type StreamEndFrame = {
@@ -80,7 +83,7 @@ export type StreamErrorFrame = {
   readonly streamId: string;
   readonly error: {
     readonly tag: string;
-    readonly data: unknown;
+    readonly data: IpcEncodedValue;
   };
 };
 
@@ -92,103 +95,75 @@ export type StreamDefectFrame = {
 
 export type StreamFrame = StreamDataFrame | StreamEndFrame | StreamErrorFrame | StreamDefectFrame;
 
-export function extractStreamIdFromRaw(value: unknown): string | null {
-  if (!isRecord(value) || typeof value.streamId !== "string") {
-    return null;
-  }
-  return value.streamId;
+function hasOwn(record: IpcEncodedRecord, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
 }
 
-export function parseStreamFrame(value: unknown): StreamFrame | null {
-  if (!isRecord(value) || typeof value.type !== "string") {
+export function extractStreamIdFromRaw<T>(value: T): string | null {
+  if (!isRecord(value)) {
     return null;
   }
-
-  if (typeof value.streamId !== "string") {
-    return null;
-  }
-
   const streamId = value.streamId;
+  return isStringValue(streamId) ? streamId : null;
+}
+
+export function parseStreamFrame<T>(value: T): StreamFrame | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const streamId = extractStreamIdFromRaw(value);
+  if (streamId === null) {
+    return null;
+  }
 
   switch (value.type) {
     case "data":
-      if (!hasOwn(value, "payload")) {
-        return null;
-      }
-      return { type: "data", streamId, payload: value.payload };
-
+      return hasOwn(value, "payload") ? { type: "data", streamId, payload: value.payload } : null;
     case "end":
       return { type: "end", streamId };
-
-    case "error":
-      if (
-        !isRecord(value.error) ||
-        typeof value.error.tag !== "string" ||
-        !hasOwn(value.error, "data")
-      ) {
+    case "error": {
+      const error = value.error;
+      if (!isRecord(error) || !isStringValue(error.tag) || !hasOwn(error, "data")) {
         return null;
       }
       return {
         type: "error",
         streamId,
-        error: { tag: value.error.tag, data: value.error.data },
+        error: { tag: error.tag, data: error.data },
       };
-
+    }
     case "defect":
-      if (typeof value.message !== "string") {
-        return null;
-      }
-      return { type: "defect", streamId, message: value.message };
-
+      return isStringValue(value.message)
+        ? { type: "defect", streamId, message: value.message }
+        : null;
     default:
       return null;
   }
 }
 
-export function parseRpcResponseEnvelope(value: unknown): RpcResponseEnvelope | null {
-  if (!isRecord(value) || typeof value.type !== "string") {
+export function parseRpcResponseEnvelope<T>(value: T): RpcResponseEnvelope | null {
+  if (!isRecord(value)) {
     return null;
   }
 
   switch (value.type) {
     case "success":
-      if (!hasOwn(value, "data")) {
+      return hasOwn(value, "data") ? { type: "success", data: value.data } : null;
+    case "failure": {
+      const error = value.error;
+      if (!isRecord(error) || !isStringValue(error.tag) || !hasOwn(error, "data")) {
         return null;
       }
-
-      return {
-        type: "success",
-        data: value.data,
-      };
-
-    case "failure":
-      if (!isRecord(value.error) || typeof value.error.tag !== "string") {
-        return null;
-      }
-
-      if (!hasOwn(value.error, "data")) {
-        return null;
-      }
-
       return {
         type: "failure",
-        error: {
-          tag: value.error.tag,
-          data: value.error.data,
-        },
+        error: { tag: error.tag, data: error.data },
       };
-
+    }
     case "defect":
-      if (typeof value.message !== "string") {
-        return null;
-      }
-
-      return {
-        type: "defect",
-        message: value.message,
-        cause: value.cause,
-      };
-
+      return isStringValue(value.message)
+        ? { type: "defect", message: value.message, cause: value.cause }
+        : null;
     default:
       return null;
   }

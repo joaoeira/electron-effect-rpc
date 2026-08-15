@@ -5,6 +5,11 @@ import { defineContract, exitSchemaFor, rpc } from "../src/contract.ts";
 import { isRecord } from "../src/protocol.ts";
 import { createRpcClient, RpcDefectError } from "../src/renderer.ts";
 import { createInvokeStub } from "../src/testing.ts";
+import {
+  formatUnknown,
+  type DecodeFailureContext,
+  type ProtocolErrorContext,
+} from "./test-support.ts";
 
 class AccessDeniedError extends S.TaggedError<AccessDeniedError>()("AccessDeniedError", {
   message: S.String,
@@ -26,7 +31,7 @@ function expectFailure<E>(exit: Exit.Exit<unknown, E>): E {
 function expectRpcDefect(exit: Exit.Exit<unknown, unknown>): RpcDefectError {
   const failure = expectFailure(exit);
   if (!(failure instanceof RpcDefectError)) {
-    throw new Error(`Expected RpcDefectError, got: ${typeof failure}`);
+    throw new Error(`Expected RpcDefectError, got: ${formatUnknown(failure)}`);
   }
   return failure;
 }
@@ -66,6 +71,24 @@ describe("createRpcClient", () => {
         payload: { a: 1, b: 2 },
       },
     ]);
+  });
+
+  it("when a contract encodes BigInt values, then the client transports and decodes them", async () => {
+    const DoubleBigInt = rpc("DoubleBigInt", S.BigInt, S.BigInt);
+    const bigintContract = defineContract({
+      methods: [DoubleBigInt] as const,
+      events: [] as const,
+    });
+    const invoke = createInvokeStub(async (_method, payload) => ({
+      type: "success",
+      data: payload === 21n ? 42n : 0n,
+    }));
+
+    const client = createRpcClient(bigintContract, { invoke });
+    const result = await Effect.runPromise(client.DoubleBigInt(21n));
+
+    expect(result).toBe(42n);
+    expect(invoke.invocations).toEqual([{ method: "DoubleBigInt", payload: 21n }]);
   });
 
   it("when a method name contains special characters, then the client invokes that exact method name", async () => {
@@ -294,7 +317,7 @@ describe("createRpcClient", () => {
   });
 
   it("when decode-failure diagnostics are emitted, then their context shape is stable", async () => {
-    const decodeFailures: Array<Record<string, unknown>> = [];
+    const decodeFailures: Array<DecodeFailureContext> = [];
     const invoke = createInvokeStub(async () => ({
       type: "success",
       data: { sum: "wrong-type" },
@@ -319,11 +342,11 @@ describe("createRpcClient", () => {
       name: "Add",
       payload: { sum: "wrong-type" },
     });
-    expect(typeof decodeFailures[0]?.cause).not.toBe("undefined");
+    expect(decodeFailures[0]?.cause).toBeDefined();
   });
 
   it("when protocol-error diagnostics are emitted, then their context shape is stable", async () => {
-    const protocolErrors: Array<Record<string, unknown>> = [];
+    const protocolErrors: Array<ProtocolErrorContext> = [];
     const malformed = { nope: true };
     const invoke = createInvokeStub(async () => malformed);
 
@@ -345,7 +368,7 @@ describe("createRpcClient", () => {
       method: "Add",
       response: malformed,
     });
-    expect(typeof protocolErrors[0]?.cause).not.toBe("undefined");
+    expect(protocolErrors[0]?.cause).toBeDefined();
   });
 
   it("when a diagnostics callback throws, then rpc transport behavior still completes", async () => {

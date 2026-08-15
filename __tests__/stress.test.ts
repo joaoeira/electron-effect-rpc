@@ -6,6 +6,7 @@ import { defineContract, event, rpc } from "../src/contract.ts";
 import { createEventPublisher, createRpcEndpoint } from "../src/main.ts";
 import { createRpcClient } from "../src/renderer.ts";
 import type { IpcMainLike } from "../src/types.ts";
+import type { IpcEncodedValue, IpcTestListener } from "./test-support.ts";
 
 const waitFor = async (predicate: () => boolean, timeoutMs = 3000) => {
   const start = Date.now();
@@ -19,7 +20,7 @@ const waitFor = async (predicate: () => boolean, timeoutMs = 3000) => {
 };
 
 const createRpcHarness = () => {
-  const handlers = new Map<string, (event: unknown, payload: unknown) => unknown>();
+  const handlers = new Map<string, IpcTestListener>();
 
   const ipcMain: IpcMainLike = {
     handle: (channel, listener) => {
@@ -30,7 +31,7 @@ const createRpcHarness = () => {
     },
   };
 
-  const invoke = async (method: string, payload: unknown) => {
+  const invoke = async (method: string, payload: IpcEncodedValue) => {
     const handler = handlers.get(`rpc/${method}`);
     if (!handler) {
       throw new Error(`Missing handler for method: ${method}`);
@@ -113,7 +114,7 @@ describe("stress", () => {
     });
 
     let windowRead = 0;
-    const sent: Array<{ channel: string; payload: unknown }> = [];
+    const sent: Array<{ channel: string; payload: IpcEncodedValue }> = [];
     const publisher = createEventPublisher(contract, {
       getWindows: () => {
         windowRead += 1;
@@ -124,7 +125,7 @@ describe("stress", () => {
           {
             isDestroyed: () => false,
             webContents: {
-              send: (channel: string, payload: unknown) => {
+              send: (channel: string, payload: IpcEncodedValue) => {
                 sent.push({ channel, payload });
               },
             },

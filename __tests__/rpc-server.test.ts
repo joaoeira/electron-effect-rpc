@@ -6,13 +6,18 @@ import { defineContract, rpc } from "../src/contract.ts";
 import { createRpcEndpoint } from "../src/main.ts";
 import { isRecord, parseRpcResponseEnvelope } from "../src/protocol.ts";
 import type { IpcMainLike } from "../src/types.ts";
+import type {
+  DecodeFailureContext,
+  IpcTestListener,
+  ProtocolErrorContext,
+} from "./test-support.ts";
 
 class DomainError extends S.TaggedError<DomainError>()("DomainError", {
   message: S.String,
 }) {}
 
 const createIpcMainStub = () => {
-  const handlers = new Map<string, (event: unknown, payload: unknown) => unknown>();
+  const handlers = new Map<string, IpcTestListener>();
 
   const ipcMain: IpcMainLike = {
     handle: (channel, listener) => {
@@ -26,10 +31,7 @@ const createIpcMainStub = () => {
   return { ipcMain, handlers };
 };
 
-const requireHandler = (
-  handlers: Map<string, (event: unknown, payload: unknown) => unknown>,
-  channel: string,
-) => {
+const requireHandler = (handlers: Map<string, IpcTestListener>, channel: string) => {
   const handler = handlers.get(channel);
   if (!handler) {
     throw new Error(`Missing handler for channel: ${channel}`);
@@ -231,7 +233,7 @@ describe("createRpcEndpoint", () => {
 
   it("when request decoding fails, then decode diagnostics include scope, method name, payload, and cause", async () => {
     const { ipcMain, handlers } = createIpcMainStub();
-    const decodeFailures: Array<Record<string, unknown>> = [];
+    const decodeFailures: Array<DecodeFailureContext> = [];
 
     const endpoint = createRpcEndpoint(
       contract,
@@ -429,7 +431,7 @@ describe("createRpcEndpoint", () => {
 
   it("when endpoint emits decode-failure diagnostics, then context shape remains stable", async () => {
     const { ipcMain, handlers } = createIpcMainStub();
-    const decodeFailures: Array<Record<string, unknown>> = [];
+    const decodeFailures: Array<DecodeFailureContext> = [];
 
     const endpoint = createRpcEndpoint(
       contract,
@@ -460,7 +462,7 @@ describe("createRpcEndpoint", () => {
       name: "Add",
       payload: { a: 1 },
     });
-    expect(typeof decodeFailures[0]?.cause).not.toBe("undefined");
+    expect(decodeFailures[0]?.cause).toBeDefined();
   });
 
   it("when endpoint emits protocol-error diagnostics, then context shape remains stable", async () => {
@@ -470,7 +472,7 @@ describe("createRpcEndpoint", () => {
       events: [] as const,
     });
     const { ipcMain, handlers } = createIpcMainStub();
-    const protocolErrors: Array<Record<string, unknown>> = [];
+    const protocolErrors: Array<ProtocolErrorContext> = [];
 
     const endpoint = createRpcEndpoint(
       brokenContract,
@@ -500,7 +502,7 @@ describe("createRpcEndpoint", () => {
       method: "Broken",
       response: { sum: "bad" },
     });
-    expect(typeof protocolErrors[0]?.cause).not.toBe("undefined");
+    expect(protocolErrors[0]?.cause).toBeDefined();
   });
 
   it("when endpoint diagnostics callback throws, then transport still returns a defect envelope", async () => {
@@ -790,7 +792,7 @@ describe("createRpcEndpoint", () => {
   });
 
   it("when start fails partway through registration, then already-registered handlers are cleaned up", () => {
-    const handlers = new Map<string, (event: unknown, payload: unknown) => unknown>();
+    const handlers = new Map<string, IpcTestListener>();
 
     const ipcMain: IpcMainLike = {
       handle: (channel, listener) => {
@@ -922,6 +924,62 @@ describe("handler context", () => {
     expect(parseRpcResponseEnvelope(withoutSender)).toEqual({
       type: "success",
       data: { senderId: -1 },
+    });
+
+    endpoint.dispose();
+  });
+
+  it("when a handler calls sender methods, then the original WebContents receiver is preserved", async () => {
+    const { ipcMain, handlers } = createIpcMainStub();
+    const CheckSender = rpc(
+      "CheckSender",
+      S.Struct({}),
+      S.Struct({ receiverPreserved: S.Boolean }),
+    );
+    const senderContract = defineContract({
+      methods: [CheckSender] as const,
+      events: [] as const,
+    });
+
+    class ReceiverAwareSender {
+      readonly id = 42;
+
+      isDestroyed(): boolean {
+        if (this !== sender) {
+          throw new Error("WebContents receiver was not preserved");
+        }
+        return false;
+      }
+
+      send(): void {
+        if (this !== sender) {
+          throw new Error("WebContents receiver was not preserved");
+        }
+      }
+    }
+
+    const sender = new ReceiverAwareSender();
+    const endpoint = createRpcEndpoint(
+      senderContract,
+      ipcMain,
+      {
+        CheckSender: (_input, context) =>
+          Effect.sync(() => ({
+            receiverPreserved: context.sender?.isDestroyed() === false,
+          })),
+      },
+      {
+        context: ContextModule.empty(),
+      },
+    );
+
+    endpoint.start();
+    const handler = requireHandler(handlers, "rpc/CheckSender");
+    const response = await handler({ sender }, {});
+
+    expect(parseRpcResponseEnvelope(response)).toEqual({
+      type: "success",
+      data: { receiverPreserved: true },
     });
 
     endpoint.dispose();

@@ -4,33 +4,43 @@ import { Effect } from "effect";
 import * as ContextModule from "effect/Context";
 import { createIpcKit, defineContract, event, rpc } from "../src/index.ts";
 import type { ChannelPrefix, IpcMainLike } from "../src/types.ts";
+import {
+  isFunctionValue,
+  type ExposedTestApi,
+  type IpcEncodedValue,
+  type IpcInvokeEvent,
+  type IpcTestListener,
+} from "./test-support.ts";
 
-const exposedGlobals: Record<string, Record<string, unknown>> = Object.create(null);
-const invokeCalls: Array<{ channel: string; payload: unknown }> = [];
+const exposedGlobals: Record<string, ExposedTestApi> = Object.create(null);
+const invokeCalls: Array<{ channel: string; payload: IpcEncodedValue }> = [];
 const onCalls: Array<{
   channel: string;
-  handler: (event: unknown, payload: unknown) => void;
+  handler: (event: IpcInvokeEvent, payload: IpcEncodedValue) => void;
 }> = [];
 const removeCalls: Array<{
   channel: string;
-  handler: (event: unknown, payload: unknown) => void;
+  handler: (event: IpcInvokeEvent, payload: IpcEncodedValue) => void;
 }> = [];
 
 mock.module("electron", () => ({
   contextBridge: {
-    exposeInMainWorld: (name: string, value: Record<string, unknown>) => {
+    exposeInMainWorld: (name: string, value: ExposedTestApi) => {
       exposedGlobals[name] = value;
     },
   },
   ipcRenderer: {
-    invoke: (channel: string, payload: unknown) => {
+    invoke: (channel: string, payload: IpcEncodedValue) => {
       invokeCalls.push({ channel, payload });
       return Promise.resolve({ ok: true });
     },
-    on: (channel: string, handler: (event: unknown, payload: unknown) => void) => {
+    on: (channel: string, handler: (event: IpcInvokeEvent, payload: IpcEncodedValue) => void) => {
       onCalls.push({ channel, handler });
     },
-    removeListener: (channel: string, handler: (event: unknown, payload: unknown) => void) => {
+    removeListener: (
+      channel: string,
+      handler: (event: IpcInvokeEvent, payload: IpcEncodedValue) => void,
+    ) => {
       removeCalls.push({ channel, handler });
     },
   },
@@ -48,7 +58,7 @@ const waitFor = async (predicate: () => boolean, timeoutMs = 1000) => {
 };
 
 const createRpcHarness = (prefix: ChannelPrefix = { rpc: "rpc/", event: "event/" }) => {
-  const handlers = new Map<string, (event: unknown, payload: unknown) => unknown>();
+  const handlers = new Map<string, IpcTestListener>();
 
   const ipcMain: IpcMainLike = {
     handle: (channel, listener) => {
@@ -59,7 +69,7 @@ const createRpcHarness = (prefix: ChannelPrefix = { rpc: "rpc/", event: "event/"
     },
   };
 
-  const invoke = async (method: string, payload: unknown) => {
+  const invoke = async (method: string, payload: IpcEncodedValue) => {
     const handler = handlers.get(`${prefix.rpc}${method}`);
     if (!handler) {
       throw new Error(`Missing handler for method: ${method}`);
@@ -75,13 +85,13 @@ const createRpcHarness = (prefix: ChannelPrefix = { rpc: "rpc/", event: "event/"
 };
 
 const createEventBusHarness = (prefix: ChannelPrefix = { rpc: "rpc/", event: "event/" }) => {
-  const listeners = new Map<string, Set<(payload: unknown) => void>>();
-  const sent: Array<{ channel: string; payload: unknown }> = [];
+  const listeners = new Map<string, Set<(payload: IpcEncodedValue) => void>>();
+  const sent: Array<{ channel: string; payload: IpcEncodedValue }> = [];
 
   const window = {
     isDestroyed: () => false,
     webContents: {
-      send: (channel: string, payload: unknown) => {
+      send: (channel: string, payload: IpcEncodedValue) => {
         sent.push({ channel, payload });
         const channelListeners = listeners.get(channel);
         if (!channelListeners) {
@@ -95,9 +105,10 @@ const createEventBusHarness = (prefix: ChannelPrefix = { rpc: "rpc/", event: "ev
     },
   };
 
-  const subscribe = (name: string, handler: (payload: unknown) => void) => {
+  const subscribe = (name: string, handler: (payload: IpcEncodedValue) => void) => {
     const channel = `${prefix.event}${name}`;
-    const channelListeners = listeners.get(channel) ?? new Set<(payload: unknown) => void>();
+    const channelListeners =
+      listeners.get(channel) ?? new Set<(payload: IpcEncodedValue) => void>();
     channelListeners.add(handler);
     listeners.set(channel, channelListeners);
 
@@ -171,7 +182,7 @@ describe("createIpcKit", () => {
 
     const invokeRaw = exposedGlobals.bridgeKit?.invoke;
     const subscribeRaw = exposedGlobals.bridgeKit?.subscribe;
-    if (typeof invokeRaw !== "function" || typeof subscribeRaw !== "function") {
+    if (!isFunctionValue(invokeRaw) || !isFunctionValue(subscribeRaw)) {
       throw new Error("expected exposed preload bridge");
     }
 
@@ -185,32 +196,38 @@ describe("createIpcKit", () => {
   });
 
   it("when electronModule is supplied, then kit preload uses supplied bindings", async () => {
-    const localExposedGlobals: Record<string, Record<string, unknown>> = Object.create(null);
-    const localInvokeCalls: Array<{ channel: string; payload: unknown }> = [];
+    const localExposedGlobals: Record<string, ExposedTestApi> = Object.create(null);
+    const localInvokeCalls: Array<{ channel: string; payload: IpcEncodedValue }> = [];
     const localOnCalls: Array<{
       channel: string;
-      handler: (event: unknown, payload: unknown) => void;
+      handler: (event: IpcInvokeEvent, payload: IpcEncodedValue) => void;
     }> = [];
     const localRemoveCalls: Array<{
       channel: string;
-      handler: (event: unknown, payload: unknown) => void;
+      handler: (event: IpcInvokeEvent, payload: IpcEncodedValue) => void;
     }> = [];
 
     const localElectronModule = {
       contextBridge: {
-        exposeInMainWorld: (name: string, value: Record<string, unknown>) => {
+        exposeInMainWorld: (name: string, value: ExposedTestApi) => {
           localExposedGlobals[name] = value;
         },
       },
       ipcRenderer: {
-        invoke: (channel: string, payload: unknown) => {
+        invoke: (channel: string, payload: IpcEncodedValue) => {
           localInvokeCalls.push({ channel, payload });
           return Promise.resolve({ ok: true });
         },
-        on: (channel: string, handler: (event: unknown, payload: unknown) => void) => {
+        on: (
+          channel: string,
+          handler: (event: IpcInvokeEvent, payload: IpcEncodedValue) => void,
+        ) => {
           localOnCalls.push({ channel, handler });
         },
-        removeListener: (channel: string, handler: (event: unknown, payload: unknown) => void) => {
+        removeListener: (
+          channel: string,
+          handler: (event: IpcInvokeEvent, payload: IpcEncodedValue) => void,
+        ) => {
           localRemoveCalls.push({ channel, handler });
         },
       },
@@ -239,7 +256,7 @@ describe("createIpcKit", () => {
 
     const invokeRaw = localExposedGlobals.localApi?.invoke;
     const subscribeRaw = localExposedGlobals.localApi?.subscribe;
-    if (typeof invokeRaw !== "function" || typeof subscribeRaw !== "function") {
+    if (!isFunctionValue(invokeRaw) || !isFunctionValue(subscribeRaw)) {
       throw new Error("expected exposed local preload bridge");
     }
 
@@ -252,6 +269,63 @@ describe("createIpcKit", () => {
     ]);
     expect(localOnCalls[0]?.channel).toBe("evt-local/Progress");
     expect(localRemoveCalls[0]?.channel).toBe("evt-local/Progress");
+  });
+
+  it("when supplied Electron bindings use their receiver, then preload preserves the receiver", async () => {
+    const receiverChecks: string[] = [];
+
+    class ReceiverAwareContextBridge {
+      exposeInMainWorld(_name: string, _value: ExposedTestApi): void {
+        if (this !== contextBridge) {
+          throw new Error("contextBridge receiver was not preserved");
+        }
+        receiverChecks.push("contextBridge");
+      }
+    }
+
+    class ReceiverAwareIpcRenderer {
+      invoke(_channel: string, _payload: IpcEncodedValue): Promise<IpcEncodedValue> {
+        if (this !== ipcRenderer) {
+          throw new Error("ipcRenderer receiver was not preserved");
+        }
+        receiverChecks.push("invoke");
+        return Promise.resolve({ type: "success", data: null });
+      }
+
+      on(
+        _channel: string,
+        _handler: (event: IpcInvokeEvent, payload: IpcEncodedValue) => void,
+      ): void {
+        if (this !== ipcRenderer) {
+          throw new Error("ipcRenderer receiver was not preserved");
+        }
+        receiverChecks.push("on");
+      }
+
+      removeListener(
+        _channel: string,
+        _handler: (event: IpcInvokeEvent, payload: IpcEncodedValue) => void,
+      ): void {
+        if (this !== ipcRenderer) {
+          throw new Error("ipcRenderer receiver was not preserved");
+        }
+        receiverChecks.push("removeListener");
+      }
+    }
+
+    const contextBridge = new ReceiverAwareContextBridge();
+    const ipcRenderer = new ReceiverAwareIpcRenderer();
+    const contract = defineContract({ methods: [] as const, events: [] as const });
+    const preload = createIpcKit({ contract }).preload({
+      electronModule: { contextBridge, ipcRenderer },
+    });
+
+    await preload.bridge.invoke("Ping", null);
+    const unsubscribe = preload.bridge.subscribe("Progress", () => {});
+    unsubscribe();
+    preload.expose();
+
+    expect(receiverChecks).toEqual(["invoke", "on", "removeListener", "contextBridge"]);
   });
 
   it("when main and renderer are built from the same kit config, then rpc and events roundtrip end-to-end", async () => {

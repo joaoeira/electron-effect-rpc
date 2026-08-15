@@ -8,13 +8,19 @@ import { isRecord, parseStreamFrame, type StreamFrame } from "../src/protocol.ts
 import { createStreamRpcClient, RpcDefectError } from "../src/renderer.ts";
 import { createIpcKit } from "../src/index.ts";
 import type { IpcMainLike, OnStreamFrame } from "../src/types.ts";
+import {
+  formatUnknown,
+  isStringValue,
+  type IpcEncodedValue,
+  type IpcTestListener,
+} from "./test-support.ts";
 
 class StreamError extends S.TaggedError<StreamError>()("StreamError", {
   message: S.String,
 }) {}
 
 const createStreamHarness = (prefix = { rpc: "rpc/", event: "event/" }) => {
-  const handlers = new Map<string, (event: unknown, payload: unknown) => unknown>();
+  const handlers = new Map<string, IpcTestListener>();
 
   const ipcMain: IpcMainLike = {
     handle: (channel, listener) => {
@@ -27,15 +33,15 @@ const createStreamHarness = (prefix = { rpc: "rpc/", event: "event/" }) => {
 
   // Simulate sender
   let senderDestroyed = false;
-  const sentFrames: Array<{ channel: string; payload: unknown }> = [];
+  const sentFrames: Array<{ channel: string; payload: IpcEncodedValue }> = [];
 
   // Frame listeners (simulating ipcRenderer.on for the sf channel)
-  const frameListeners = new Set<(frame: unknown) => void>();
+  const frameListeners = new Set<(frame: IpcEncodedValue) => void>();
 
   const mockSender = {
     id: 1,
     isDestroyed: () => senderDestroyed,
-    send: (channel: string, payload: unknown) => {
+    send: (channel: string, payload: IpcEncodedValue) => {
       sentFrames.push({ channel, payload });
       // Dispatch to any registered frame listeners
       if (channel === `${prefix.rpc}sf`) {
@@ -48,7 +54,7 @@ const createStreamHarness = (prefix = { rpc: "rpc/", event: "event/" }) => {
 
   const mockEvent = { sender: mockSender };
 
-  const invoke = async (method: string, payload: unknown) => {
+  const invoke = async (method: string, payload: IpcEncodedValue) => {
     const handler = handlers.get(`${prefix.rpc}${method}`);
     if (!handler) {
       throw new Error(`Missing handler for method: ${method}`);
@@ -89,7 +95,7 @@ const createScheduledFrameBridge = ({
   tickDelayMs?: number;
   tailFramesAfterEnd?: number;
 }) => {
-  const listeners = new Set<(frame: unknown) => void>();
+  const listeners = new Set<(frame: IpcEncodedValue) => void>();
   const cancelled = new Set<string>();
   const cancelCalls: string[] = [];
   const startedStreamIds: string[] = [];
@@ -101,15 +107,15 @@ const createScheduledFrameBridge = ({
     };
   };
 
-  const emitFrame = (frame: unknown) => {
+  const emitFrame = (frame: IpcEncodedValue) => {
     for (const listener of listeners) {
       listener(frame);
     }
   };
 
-  const invoke = async (method: string, payload: unknown) => {
+  const invoke = async (method: string, payload: IpcEncodedValue) => {
     if (method === "stream-cancel") {
-      if (isRecord(payload) && typeof payload.streamId === "string") {
+      if (isRecord(payload) && isStringValue(payload.streamId)) {
         cancelCalls.push(payload.streamId);
         cancelled.add(payload.streamId);
       }
@@ -119,7 +125,7 @@ const createScheduledFrameBridge = ({
       return { type: "success", data: {} };
     }
 
-    if (!isRecord(payload) || typeof payload.streamId !== "string") {
+    if (!isRecord(payload) || !isStringValue(payload.streamId)) {
       throw new Error("Missing streamId in stream invoke payload");
     }
     const streamId = payload.streamId;
@@ -176,20 +182,21 @@ const waitFor = async (predicate: () => boolean, timeoutMs = 2000) => {
 };
 
 /** Safely parse the payload of a sent frame. Returns null if not a valid StreamFrame. */
-const asFrame = (f: { payload: unknown }): StreamFrame | null => parseStreamFrame(f.payload);
+const asFrame = (f: { payload: IpcEncodedValue }): StreamFrame | null =>
+  parseStreamFrame(f.payload);
 
 /** Extract streamId from a frame payload using isRecord. */
-const extractStreamId = (payload: unknown): string => {
-  if (isRecord(payload) && typeof payload.streamId === "string") {
+const extractStreamId = (payload: IpcEncodedValue): string => {
+  if (isRecord(payload) && isStringValue(payload.streamId)) {
     return payload.streamId;
   }
   throw new Error("Expected payload with streamId");
 };
 
-/** Safely narrow an unknown error value to RpcDefectError after instanceof check. */
-const asRpcDefect = (value: unknown): RpcDefectError => {
+/** Safely narrow an error value to RpcDefectError after instanceof check. */
+const asRpcDefect = <T>(value: T): RpcDefectError => {
   if (!(value instanceof RpcDefectError)) {
-    throw new Error(`Expected RpcDefectError, got: ${typeof value}`);
+    throw new Error(`Expected RpcDefectError, got: ${formatUnknown(value)}`);
   }
   return value;
 };
@@ -599,7 +606,7 @@ describe("createRpcEndpoint with streamHandlers", () => {
       streamId: "dup-id",
     });
     expect(second).toMatchObject({ type: "defect" });
-    if (isRecord(second) && typeof second.message === "string") {
+    if (isRecord(second) && isStringValue(second.message)) {
       expect(second.message).toContain("Duplicate");
     }
 
@@ -1617,7 +1624,7 @@ describe("renderer-side stream edge cases", () => {
   it("when handshake returns unexpected response, then stream fails with stream_handshake_invalid", async () => {
     const harness = createStreamHarness();
 
-    const mockInvoke = async (method: string, _payload: unknown) => {
+    const mockInvoke = async (method: string, _payload: IpcEncodedValue) => {
       if (method.startsWith("stream/")) {
         return { type: "success", data: { unexpected: true } };
       }
@@ -1834,7 +1841,7 @@ describe("renderer-side stream edge cases", () => {
           return { cancelled: true };
         }
         if (method.startsWith("stream/")) {
-          if (!isRecord(payload) || typeof payload.streamId !== "string") {
+          if (!isRecord(payload) || !isStringValue(payload.streamId)) {
             throw new Error("Missing streamId");
           }
           activeStreamId = payload.streamId;
@@ -1884,7 +1891,7 @@ describe("renderer-side stream edge cases", () => {
       (ctx) =>
         isRecord(ctx) &&
         isRecord(ctx.cause) &&
-        typeof ctx.cause.message === "string" &&
+        ctx.cause instanceof Error &&
         ctx.cause.message.includes("post-close"),
     );
 
@@ -1975,7 +1982,7 @@ describe("stream rpc e2e edge cases", () => {
     const harness = createStreamHarness();
 
     // Mock invoke that returns a defect envelope for stream handshake
-    const mockInvoke = async (method: string, _payload: unknown) => {
+    const mockInvoke = async (method: string, _payload: IpcEncodedValue) => {
       if (method.startsWith("stream/")) {
         return {
           type: "defect",

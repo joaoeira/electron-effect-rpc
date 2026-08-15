@@ -1,30 +1,42 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
+import {
+  isFunctionValue,
+  type ExposedTestApi,
+  type IpcEncodedValue,
+  type IpcInvokeEvent,
+} from "./test-support.ts";
 
-type ExposedGlobals = Record<string, Record<string, unknown>>;
+type ExposedGlobals = Record<string, ExposedTestApi>;
 
 const exposedGlobals: ExposedGlobals = Object.create(null);
-const invokeCalls: Array<{ channel: string; payload: unknown }> = [];
-const onCalls: Array<{ channel: string; handler: (event: unknown, payload: unknown) => void }> = [];
+const invokeCalls: Array<{ channel: string; payload: IpcEncodedValue }> = [];
+const onCalls: Array<{
+  channel: string;
+  handler: (event: IpcInvokeEvent, payload: IpcEncodedValue) => void;
+}> = [];
 const removeCalls: Array<{
   channel: string;
-  handler: (event: unknown, payload: unknown) => void;
+  handler: (event: IpcInvokeEvent, payload: IpcEncodedValue) => void;
 }> = [];
 
 const electronModule = {
   contextBridge: {
-    exposeInMainWorld: (name: string, value: Record<string, unknown>) => {
+    exposeInMainWorld: (name: string, value: ExposedTestApi) => {
       exposedGlobals[name] = value;
     },
   },
   ipcRenderer: {
-    invoke: (channel: string, payload: unknown) => {
+    invoke: (channel: string, payload: IpcEncodedValue) => {
       invokeCalls.push({ channel, payload });
       return Promise.resolve({ ok: true });
     },
-    on: (channel: string, handler: (event: unknown, payload: unknown) => void) => {
+    on: (channel: string, handler: (event: IpcInvokeEvent, payload: IpcEncodedValue) => void) => {
       onCalls.push({ channel, handler });
     },
-    removeListener: (channel: string, handler: (event: unknown, payload: unknown) => void) => {
+    removeListener: (
+      channel: string,
+      handler: (event: IpcInvokeEvent, payload: IpcEncodedValue) => void,
+    ) => {
       removeCalls.push({ channel, handler });
     },
   },
@@ -84,7 +96,7 @@ describe("preload bridge", () => {
 
   it("when bridge subscribe is called, then listener is registered on the prefixed channel", () => {
     const adapters = createBridgeAdapters();
-    const seen: unknown[] = [];
+    const seen: IpcEncodedValue[] = [];
     adapters.subscribe("Stream", (payload) => {
       seen.push(payload);
     });
@@ -118,8 +130,8 @@ describe("preload bridge", () => {
     exposeRpcBridge();
 
     expect(Object.keys(exposedGlobals).sort()).toEqual(["events", "rpc"]);
-    expect(typeof exposedGlobals.rpc?.invoke).toBe("function");
-    expect(typeof exposedGlobals.events?.subscribe).toBe("function");
+    expect(isFunctionValue(exposedGlobals.rpc?.invoke)).toBe(true);
+    expect(isFunctionValue(exposedGlobals.events?.subscribe)).toBe(true);
   });
 
   it("when exposeRpcBridge receives custom global names, then those names are exposed", () => {
@@ -129,8 +141,8 @@ describe("preload bridge", () => {
     });
 
     expect(Object.keys(exposedGlobals).sort()).toEqual(["rpcApi", "rpcEvents"]);
-    expect(typeof exposedGlobals.rpcApi?.invoke).toBe("function");
-    expect(typeof exposedGlobals.rpcEvents?.subscribe).toBe("function");
+    expect(isFunctionValue(exposedGlobals.rpcApi?.invoke)).toBe(true);
+    expect(isFunctionValue(exposedGlobals.rpcEvents?.subscribe)).toBe(true);
   });
 
   it("when exposeRpcBridge receives custom prefixes, then exposed adapters use those prefixes", async () => {
@@ -143,7 +155,7 @@ describe("preload bridge", () => {
     const invokeRaw = exposedGlobals.rpcApi?.invoke;
     const subscribeRaw = exposedGlobals.rpcEvents?.subscribe;
 
-    if (typeof invokeRaw !== "function" || typeof subscribeRaw !== "function") {
+    if (!isFunctionValue(invokeRaw) || !isFunctionValue(subscribeRaw)) {
       throw new Error("expected bridge globals");
     }
 
@@ -163,8 +175,8 @@ describe("preload bridge", () => {
     exposeIpcBridge();
 
     expect(Object.keys(exposedGlobals)).toEqual(["api"]);
-    expect(typeof exposedGlobals.api?.invoke).toBe("function");
-    expect(typeof exposedGlobals.api?.subscribe).toBe("function");
+    expect(isFunctionValue(exposedGlobals.api?.invoke)).toBe(true);
+    expect(isFunctionValue(exposedGlobals.api?.subscribe)).toBe(true);
   });
 
   it("when exposeIpcBridge receives custom global and prefix, then invoke and subscribe use those values", async () => {
@@ -177,7 +189,7 @@ describe("preload bridge", () => {
     const invokeRaw = api?.invoke;
     const subscribeRaw = api?.subscribe;
 
-    if (typeof invokeRaw !== "function" || typeof subscribeRaw !== "function") {
+    if (!isFunctionValue(invokeRaw) || !isFunctionValue(subscribeRaw)) {
       throw new Error("expected exposed bridge global");
     }
 

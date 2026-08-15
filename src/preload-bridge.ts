@@ -1,16 +1,35 @@
-import { isRecord } from "./protocol.ts";
+import { isFunctionValue, isRecord, type IpcEncodedValue } from "./boundary.ts";
 import {
   assertValidChannelPrefix,
   defaultChannelPrefix,
   type ChannelPrefix,
   type EventSubscribe,
+  type IpcInvokeEvent,
+  type OnStreamFrame,
   type RpcInvoke,
 } from "./types.ts";
+
+export type ExposedRpcApi = {
+  readonly invoke: RpcInvoke;
+  readonly onStreamFrame: OnStreamFrame;
+};
+
+export type ExposedEventsApi = {
+  readonly subscribe: EventSubscribe;
+};
+
+export type ExposedIpcApi = {
+  readonly invoke: RpcInvoke;
+  readonly subscribe: EventSubscribe;
+  readonly onStreamFrame: OnStreamFrame;
+};
+
+export type ExposedBridgeValue = ExposedRpcApi | ExposedEventsApi | ExposedIpcApi;
 
 export type BridgeAdapters = {
   readonly invoke: RpcInvoke;
   readonly subscribe: EventSubscribe;
-  readonly onStreamFrame: (listener: (frame: unknown) => void) => () => void;
+  readonly onStreamFrame: OnStreamFrame;
 };
 
 export type BridgeAdaptersOptions = {
@@ -27,59 +46,82 @@ export type IpcBridgeExposureOptions = BridgeAdaptersOptions & {
 };
 
 type ContextBridgeLike = {
-  readonly exposeInMainWorld: (name: string, value: Record<string, unknown>) => void;
+  readonly exposeInMainWorld: (name: string, value: ExposedBridgeValue) => void;
 };
 
 type IpcRendererLike = {
-  readonly invoke: (channel: string, payload: unknown) => Promise<unknown>;
-  readonly on: (channel: string, handler: (event: unknown, payload: unknown) => void) => void;
+  readonly invoke: (channel: string, payload: IpcEncodedValue) => Promise<IpcEncodedValue>;
+  readonly on: (
+    channel: string,
+    handler: (event: IpcInvokeEvent, payload: IpcEncodedValue) => void,
+  ) => void;
   readonly removeListener: (
     channel: string,
-    handler: (event: unknown, payload: unknown) => void,
+    handler: (event: IpcInvokeEvent, payload: IpcEncodedValue) => void,
   ) => void;
 };
 
-type ElectronRendererBindings = {
+export type ElectronRendererBindings = {
   readonly contextBridge: ContextBridgeLike;
   readonly ipcRenderer: IpcRendererLike;
 };
 
-function isContextBridgeLike(value: unknown): value is ContextBridgeLike {
-  return isRecord(value) && typeof value.exposeInMainWorld === "function";
+type ElectronRuntimeFunction = (...arguments_: never[]) => void;
+
+type ElectronDirectModuleCandidate = {
+  readonly contextBridge: {
+    readonly exposeInMainWorld: ElectronRuntimeFunction;
+  };
+  readonly ipcRenderer: {
+    readonly invoke: ElectronRuntimeFunction;
+    readonly on: ElectronRuntimeFunction;
+    readonly removeListener: ElectronRuntimeFunction;
+  };
+};
+
+export type ElectronModuleCandidate =
+  | ElectronDirectModuleCandidate
+  | { readonly default: ElectronModuleCandidate };
+
+function isContextBridgeLike<T>(value: T): value is T & ContextBridgeLike {
+  return isRecord(value) && isFunctionValue(value.exposeInMainWorld);
 }
 
-function isIpcRendererLike(value: unknown): value is IpcRendererLike {
+function isIpcRendererLike<T>(value: T): value is T & IpcRendererLike {
   return (
     isRecord(value) &&
-    typeof value.invoke === "function" &&
-    typeof value.on === "function" &&
-    typeof value.removeListener === "function"
+    isFunctionValue(value.invoke) &&
+    isFunctionValue(value.on) &&
+    isFunctionValue(value.removeListener)
   );
 }
 
-export function resolveElectronRendererBindings(
-  moduleCandidate: unknown,
-): ElectronRendererBindings {
-  const moduleDefault = isRecord(moduleCandidate) ? moduleCandidate.default : undefined;
-  const source = isRecord(moduleCandidate)
-    ? moduleCandidate
-    : isRecord(moduleDefault)
-      ? moduleDefault
-      : undefined;
+function isElectronRendererBindings<T>(value: T): value is T & ElectronRendererBindings {
+  return (
+    isRecord(value) &&
+    isContextBridgeLike(value.contextBridge) &&
+    isIpcRendererLike(value.ipcRenderer)
+  );
+}
 
-  if (!source) {
-    throw new Error("electron-effect-rpc/preload requires Electron preload runtime bindings.");
+function parseElectronRendererBindings<T>(value: T): ElectronRendererBindings | null {
+  return isElectronRendererBindings(value) ? value : null;
+}
+
+export function resolveElectronRendererBindings<T>(moduleCandidate: T): ElectronRendererBindings {
+  const direct = parseElectronRendererBindings(moduleCandidate);
+  if (direct) {
+    return direct;
   }
 
-  const { contextBridge, ipcRenderer } = source;
-  if (!isContextBridgeLike(contextBridge) || !isIpcRendererLike(ipcRenderer)) {
-    throw new Error("electron-effect-rpc/preload requires Electron preload runtime bindings.");
+  if (isRecord(moduleCandidate)) {
+    const fromDefault = parseElectronRendererBindings(moduleCandidate.default);
+    if (fromDefault) {
+      return fromDefault;
+    }
   }
 
-  return {
-    contextBridge,
-    ipcRenderer,
-  };
+  throw new Error("electron-effect-rpc/preload requires Electron preload runtime bindings.");
 }
 
 export function createBridgeAdaptersFromBindings(
@@ -91,11 +133,11 @@ export function createBridgeAdaptersFromBindings(
     : defaultChannelPrefix;
   const { ipcRenderer } = bindings;
 
-  const invoke: RpcInvoke = (method: string, payload: unknown) =>
+  const invoke: RpcInvoke = (method, payload) =>
     ipcRenderer.invoke(`${channelPrefix.rpc}${method}`, payload);
 
   const subscribe: EventSubscribe = (event, listener) => {
-    const wrapped = (_event: unknown, payload: unknown) => listener(payload);
+    const wrapped = (_event: IpcInvokeEvent, payload: IpcEncodedValue) => listener(payload);
 
     const channel = `${channelPrefix.event}${event}`;
     ipcRenderer.on(channel, wrapped);
@@ -105,9 +147,9 @@ export function createBridgeAdaptersFromBindings(
     };
   };
 
-  const onStreamFrame = (listener: (frame: unknown) => void) => {
+  const onStreamFrame: OnStreamFrame = (listener) => {
     const channel = `${channelPrefix.rpc}sf`;
-    const wrapped = (_event: unknown, frame: unknown) => listener(frame);
+    const wrapped = (_event: IpcInvokeEvent, frame: IpcEncodedValue) => listener(frame);
     ipcRenderer.on(channel, wrapped);
     return () => {
       ipcRenderer.removeListener(channel, wrapped);

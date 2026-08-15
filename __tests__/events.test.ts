@@ -5,6 +5,11 @@ import { defineContract, event } from "../src/contract.ts";
 import { createEventPublisher } from "../src/main.ts";
 import { isRecord } from "../src/protocol.ts";
 import { createEventSubscriber } from "../src/renderer.ts";
+import type {
+  DispatchFailureContext,
+  DroppedEventContext,
+  IpcEncodedValue,
+} from "./test-support.ts";
 
 const waitFor = async (predicate: () => boolean, timeoutMs = 500) => {
   const start = Date.now();
@@ -33,7 +38,7 @@ describe("createEventSubscriber", () => {
   });
 
   it("when subscriber uses default safe mode and payload decoding fails, then handler is skipped and diagnostics are reported", () => {
-    let listener: ((payload: unknown) => void) | undefined;
+    let listener: ((payload: IpcEncodedValue) => void) | undefined;
     const decodeFailures: unknown[] = [];
 
     const subscriber = createEventSubscriber(contract, {
@@ -61,7 +66,7 @@ describe("createEventSubscriber", () => {
   });
 
   it("when subscriber uses strict mode and payload decoding fails, then decode error is thrown", () => {
-    let listener: ((payload: unknown) => void) | undefined;
+    let listener: ((payload: IpcEncodedValue) => void) | undefined;
 
     const subscriber = createEventSubscriber(contract, {
       subscribe: (_name, handler) => {
@@ -87,7 +92,7 @@ describe("createEventSubscriber", () => {
   });
 
   it("when subscribeByName receives a valid payload, then it decodes and invokes the handler", () => {
-    let listener: ((payload: unknown) => void) | undefined;
+    let listener: ((payload: IpcEncodedValue) => void) | undefined;
 
     const subscriber = createEventSubscriber(contract, {
       subscribe: (_name, handler) => {
@@ -138,7 +143,7 @@ describe("createEventSubscriber", () => {
   });
 
   it("when a subscription is unsubscribed, then its handler is no longer called", () => {
-    const listeners = new Set<(payload: unknown) => void>();
+    const listeners = new Set<(payload: IpcEncodedValue) => void>();
 
     const subscriber = createEventSubscriber(contract, {
       subscribe: (_name, handler) => {
@@ -166,7 +171,7 @@ describe("createEventSubscriber", () => {
   });
 
   it("when subscriber is disposed, then handlers are no longer called", () => {
-    const listeners = new Set<(payload: unknown) => void>();
+    const listeners = new Set<(payload: IpcEncodedValue) => void>();
 
     const subscriber = createEventSubscriber(contract, {
       subscribe: (_name, handler) => {
@@ -227,11 +232,11 @@ describe("createEventPublisher", () => {
   });
 
   it("when publisher is started, then encoded events are dispatched to renderer listeners", async () => {
-    const sent: Array<{ channel: string; payload: unknown }> = [];
+    const sent: Array<{ channel: string; payload: IpcEncodedValue }> = [];
     const windowStub = {
       isDestroyed: () => false,
       webContents: {
-        send: (channel: string, payload: unknown) => {
+        send: (channel: string, payload: IpcEncodedValue) => {
           sent.push({ channel, payload });
         },
       },
@@ -288,11 +293,11 @@ describe("createEventPublisher", () => {
   });
 
   it("when a custom event prefix is configured, then published events use that prefix", async () => {
-    const sent: Array<{ channel: string; payload: unknown }> = [];
+    const sent: Array<{ channel: string; payload: IpcEncodedValue }> = [];
     const windowStub = {
       isDestroyed: () => false,
       webContents: {
-        send: (channel: string, payload: unknown) => {
+        send: (channel: string, payload: IpcEncodedValue) => {
           sent.push({ channel, payload });
         },
       },
@@ -317,11 +322,11 @@ describe("createEventPublisher", () => {
   });
 
   it("when multiple events are queued, then publisher preserves fifo delivery order", async () => {
-    const sent: Array<{ channel: string; payload: unknown }> = [];
+    const sent: Array<{ channel: string; payload: IpcEncodedValue }> = [];
     const windowStub = {
       isDestroyed: () => false,
       webContents: {
-        send: (channel: string, payload: unknown) => {
+        send: (channel: string, payload: IpcEncodedValue) => {
           sent.push({ channel, payload });
         },
       },
@@ -341,13 +346,13 @@ describe("createEventPublisher", () => {
   });
 
   it("when queue reaches maxQueueSize, then oldest queued events are dropped", async () => {
-    const sent: Array<{ channel: string; payload: unknown }> = [];
+    const sent: Array<{ channel: string; payload: IpcEncodedValue }> = [];
     const dropped: unknown[] = [];
 
     const windowStub = {
       isDestroyed: () => false,
       webContents: {
-        send: (channel: string, payload: unknown) => {
+        send: (channel: string, payload: IpcEncodedValue) => {
           sent.push({ channel, payload });
         },
       },
@@ -440,11 +445,11 @@ describe("createEventPublisher", () => {
   it("when event payload encoding fails, then publisher records a dropped event and decode diagnostics", async () => {
     const dropped: unknown[] = [];
     const decodeFailures: unknown[] = [];
-    const sent: Array<{ channel: string; payload: unknown }> = [];
+    const sent: Array<{ channel: string; payload: IpcEncodedValue }> = [];
     const windowStub = {
       isDestroyed: () => false,
       webContents: {
-        send: (channel: string, payload: unknown) => {
+        send: (channel: string, payload: IpcEncodedValue) => {
           sent.push({ channel, payload });
         },
       },
@@ -481,11 +486,11 @@ describe("createEventPublisher", () => {
   });
 
   it("when publisher is stopped, then dispatch pauses and queued events are retained", async () => {
-    const sent: Array<{ channel: string; payload: unknown }> = [];
+    const sent: Array<{ channel: string; payload: IpcEncodedValue }> = [];
     const windowStub = {
       isDestroyed: () => false,
       webContents: {
-        send: (channel: string, payload: unknown) => {
+        send: (channel: string, payload: IpcEncodedValue) => {
           sent.push({ channel, payload });
         },
       },
@@ -505,11 +510,11 @@ describe("createEventPublisher", () => {
   });
 
   it("when publisher restarts after stop, then queued events are drained", async () => {
-    const sent: Array<{ channel: string; payload: unknown }> = [];
+    const sent: Array<{ channel: string; payload: IpcEncodedValue }> = [];
     const windowStub = {
       isDestroyed: () => false,
       webContents: {
-        send: (channel: string, payload: unknown) => {
+        send: (channel: string, payload: IpcEncodedValue) => {
           sent.push({ channel, payload });
         },
       },
@@ -532,11 +537,11 @@ describe("createEventPublisher", () => {
   });
 
   it("when publish is called after dispose, then no event is dispatched and stats stay unchanged", async () => {
-    const sent: Array<{ channel: string; payload: unknown }> = [];
+    const sent: Array<{ channel: string; payload: IpcEncodedValue }> = [];
     const windowStub = {
       isDestroyed: () => false,
       webContents: {
-        send: (channel: string, payload: unknown) => {
+        send: (channel: string, payload: IpcEncodedValue) => {
           sent.push({ channel, payload });
         },
       },
@@ -559,13 +564,13 @@ describe("createEventPublisher", () => {
   it("when one dispatch fails, then publisher continues draining subsequent events", async () => {
     const dispatchFailures: unknown[] = [];
     const dropped: unknown[] = [];
-    const sent: Array<{ channel: string; payload: unknown }> = [];
+    const sent: Array<{ channel: string; payload: IpcEncodedValue }> = [];
 
     let attempt = 0;
     const windowStub = {
       isDestroyed: () => false,
       webContents: {
-        send: (channel: string, payload: unknown) => {
+        send: (channel: string, payload: IpcEncodedValue) => {
           attempt += 1;
           if (attempt === 1) {
             throw new Error("transient send failure");
@@ -649,7 +654,7 @@ describe("createEventPublisher", () => {
   });
 
   it("when dispatch-failure diagnostics are emitted, then context shape is stable", async () => {
-    const dispatchFailures: Array<Record<string, unknown>> = [];
+    const dispatchFailures: Array<DispatchFailureContext> = [];
 
     const publisher = createEventPublisher(contract, {
       getWindows: () => [
@@ -679,11 +684,11 @@ describe("createEventPublisher", () => {
       event: "Progress",
       payload: { value: 1 },
     });
-    expect(typeof dispatchFailures[0]?.cause).not.toBe("undefined");
+    expect(dispatchFailures[0]?.cause).toBeDefined();
   });
 
   it("when dropped-event diagnostics are emitted, then context shape is stable", async () => {
-    const dropped: Array<Record<string, unknown>> = [];
+    const dropped: Array<DroppedEventContext> = [];
 
     const publisher = createEventPublisher(contract, {
       getWindows: () => [],
@@ -732,11 +737,11 @@ describe("createEventPublisher", () => {
     const decodeFailures: unknown[] = [];
     const dispatchFailures: unknown[] = [];
     const dropped: unknown[] = [];
-    const sent: Array<{ channel: string; payload: unknown }> = [];
+    const sent: Array<{ channel: string; payload: IpcEncodedValue }> = [];
     const windowStub = {
       isDestroyed: () => false,
       webContents: {
-        send: (channel: string, payload: unknown) => {
+        send: (channel: string, payload: IpcEncodedValue) => {
           sent.push({ channel, payload });
         },
       },
@@ -825,12 +830,12 @@ describe("createEventPublisher", () => {
   });
 
   it("when multiple windows are provided, then event is dispatched to all windows", async () => {
-    const sentA: Array<{ channel: string; payload: unknown }> = [];
-    const sentB: Array<{ channel: string; payload: unknown }> = [];
+    const sentA: Array<{ channel: string; payload: IpcEncodedValue }> = [];
+    const sentB: Array<{ channel: string; payload: IpcEncodedValue }> = [];
     const windowA = {
       isDestroyed: () => false,
       webContents: {
-        send: (channel: string, payload: unknown) => {
+        send: (channel: string, payload: IpcEncodedValue) => {
           sentA.push({ channel, payload });
         },
       },
@@ -838,7 +843,7 @@ describe("createEventPublisher", () => {
     const windowB = {
       isDestroyed: () => false,
       webContents: {
-        send: (channel: string, payload: unknown) => {
+        send: (channel: string, payload: IpcEncodedValue) => {
           sentB.push({ channel, payload });
         },
       },
@@ -858,7 +863,7 @@ describe("createEventPublisher", () => {
   });
 
   it("when one window send throws during fan-out, then other windows still receive the event", async () => {
-    const sentB: Array<{ channel: string; payload: unknown }> = [];
+    const sentB: Array<{ channel: string; payload: IpcEncodedValue }> = [];
     const dropped: unknown[] = [];
     const windowA = {
       isDestroyed: () => false,
@@ -871,7 +876,7 @@ describe("createEventPublisher", () => {
     const windowB = {
       isDestroyed: () => false,
       webContents: {
-        send: (channel: string, payload: unknown) => {
+        send: (channel: string, payload: IpcEncodedValue) => {
           sentB.push({ channel, payload });
         },
       },
@@ -897,7 +902,7 @@ describe("createEventPublisher", () => {
   });
 
   it("when some windows are destroyed during fan-out, then destroyed windows are dropped and live windows receive", async () => {
-    const sentB: Array<{ channel: string; payload: unknown }> = [];
+    const sentB: Array<{ channel: string; payload: IpcEncodedValue }> = [];
     const dropped: unknown[] = [];
     const windowDestroyed = {
       isDestroyed: () => true,
@@ -908,7 +913,7 @@ describe("createEventPublisher", () => {
     const windowLive = {
       isDestroyed: () => false,
       webContents: {
-        send: (channel: string, payload: unknown) => {
+        send: (channel: string, payload: IpcEncodedValue) => {
           sentB.push({ channel, payload });
         },
       },
@@ -1000,7 +1005,7 @@ describe("createEventPublisher", () => {
     const windowStub = {
       isDestroyed: () => false,
       webContents: {
-        send: (_channel: string, payload: unknown) => {
+        send: (_channel: string, payload: IpcEncodedValue) => {
           sent.push(payload);
         },
       },
@@ -1040,7 +1045,7 @@ describe("EventSubscriber.stream", () => {
   });
 
   it("when events arrive, then the stream yields decoded payloads and unsubscribes on close", async () => {
-    let listener: ((payload: unknown) => void) | undefined;
+    let listener: ((payload: IpcEncodedValue) => void) | undefined;
     let unsubscribed = false;
 
     const subscriber = createEventSubscriber(contract, {

@@ -1,5 +1,13 @@
 import * as S from "effect/Schema";
 import { Cause, Effect, Exit, Fiber, Result, Stream } from "effect";
+import {
+  isFunctionValue,
+  isNumberValue,
+  isRecord,
+  isStringValue,
+  toDiagnosticCause,
+  type IpcEncodedValue,
+} from "./boundary.ts";
 import type {
   AnyStreamMethod,
   RpcContract,
@@ -15,7 +23,6 @@ import { isNoErrorSchema } from "./contract.ts";
 import {
   extractErrorTag,
   formatUnknown,
-  isRecord,
   safelyCall,
   toDefectEnvelope,
   type RpcResponseEnvelope,
@@ -31,52 +38,47 @@ import {
   type AnyMethod,
   type ChannelPrefix,
   type EventPublisherOptions,
+  type EventPublisherStats,
   type Implementations,
+  type IpcInvokeEvent,
   type IpcMainLike,
   type RpcEndpoint,
   type RpcEndpointOptions,
   type RpcEventPublisher,
-  type RpcHandlerContext,
-  type StreamImplementations,
   type WebContentsLike,
 } from "./types.ts";
 
-type RpcListener = (event: unknown, payload: unknown) => Promise<RpcResponseEnvelope>;
+function readNamed<T, K extends keyof T>(record: T, key: K): T[K] {
+  return record[key];
+}
+
+type RpcListener = (
+  event: IpcInvokeEvent,
+  payload: IpcEncodedValue,
+) => Promise<RpcResponseEnvelope>;
 
 function resolveChannelPrefix(prefix: ChannelPrefix | undefined): ChannelPrefix {
   return prefix ? assertValidChannelPrefix(prefix) : defaultChannelPrefix;
 }
 
-function isWebContentsLike(value: unknown): value is WebContentsLike {
-  if (!isRecord(value)) return false;
+function isWebContentsLike<T>(value: T): value is T & WebContentsLike {
   return (
-    typeof value.id === "number" &&
-    typeof value.isDestroyed === "function" &&
-    typeof value.send === "function"
+    isRecord(value) &&
+    isNumberValue(value.id) &&
+    isFunctionValue(value.isDestroyed) &&
+    isFunctionValue(value.send) &&
+    (value.once === undefined || isFunctionValue(value.once)) &&
+    (value.removeListener === undefined || isFunctionValue(value.removeListener))
   );
 }
 
-function extractSender(event: unknown): WebContentsLike | null {
+function parseWebContentsLike<T>(value: T): WebContentsLike | null {
+  return isWebContentsLike(value) ? value : null;
+}
+
+function extractSender<T>(event: T): WebContentsLike | null {
   if (!isRecord(event)) return null;
-  return isWebContentsLike(event.sender) ? event.sender : null;
-}
-
-function isImplementation<M extends AnyMethod, R>(
-  value: unknown,
-): value is (
-  input: RpcInput<M>,
-  context: RpcHandlerContext,
-) => Effect.Effect<RpcOutput<M>, RpcError<M>, R> {
-  return typeof value === "function";
-}
-
-function isStreamImplementation<M extends AnyStreamMethod, R>(
-  value: unknown,
-): value is (
-  input: StreamInput<M>,
-  context: RpcHandlerContext,
-) => Stream.Stream<StreamChunk<M>, StreamError<M>, R> {
-  return typeof value === "function";
+  return parseWebContentsLike(event.sender);
 }
 
 export function createRpcEndpoint<
@@ -94,8 +96,7 @@ export function createRpcEndpoint<
   const diagnostics = options.diagnostics;
   const runPromiseExit = Effect.runPromiseExitWith(options.context);
 
-  const implementationsByName: Implementations<RpcContract<Methods, Events, StreamMethods>, R> &
-    Record<string, unknown> = implementations;
+  const implementationsByName = implementations;
 
   const methodNames = new Set(contract.methods.map((method) => method.name));
 
@@ -105,19 +106,23 @@ export function createRpcEndpoint<
     }
   }
 
-  function reportProtocolError(method: string, response: unknown, cause: unknown): void {
+  function reportProtocolError<TResponse, TCause>(
+    method: string,
+    response: TResponse,
+    cause: TCause,
+  ): void {
     safelyCall(diagnostics?.onProtocolError, {
       method,
-      response,
-      cause,
+      response: toDiagnosticCause(response),
+      cause: toDiagnosticCause(cause),
     });
   }
 
   const listeners = new Map<string, RpcListener>();
 
   for (const method of contract.methods) {
-    const impl = implementationsByName[method.name];
-    if (!isImplementation<typeof method, R>(impl)) {
+    const impl = readNamed(implementationsByName, method.name);
+    if (!isFunctionValue(impl)) {
       throw new Error(`Missing implementation for RPC method: ${method.name}`);
     }
 
@@ -130,8 +135,8 @@ export function createRpcEndpoint<
     listeners.set(
       channel,
       async function handleRpcRequest(
-        event: unknown,
-        rawPayload: unknown,
+        event: IpcInvokeEvent,
+        rawPayload: IpcEncodedValue,
       ): Promise<RpcResponseEnvelope> {
         let input: RpcInput<typeof method>;
         try {
@@ -141,7 +146,7 @@ export function createRpcEndpoint<
             scope: "rpc-request",
             name: method.name,
             payload: rawPayload,
-            cause,
+            cause: toDiagnosticCause(cause),
           });
 
           return toDefectEnvelope(cause, `RPC ${method.name} request decode failed`);
@@ -211,10 +216,7 @@ export function createRpcEndpoint<
   const activeStreams = new Map<string, ActiveStreamEntry>();
   const streamListeners = new Map<string, RpcListener>();
   const streamMethods = contract.streamMethods ?? [];
-  const streamHandlerImpls:
-    | (StreamImplementations<RpcContract<Methods, Events, StreamMethods>, R> &
-        Record<string, unknown>)
-    | undefined = options.streamHandlers;
+  const streamHandlerImpls = options.streamHandlers;
 
   const cancelChannel = `${channelPrefix.rpc}stream-cancel`;
 
@@ -242,8 +244,8 @@ export function createRpcEndpoint<
     const runFork = Effect.runForkWith(options.context);
 
     for (const method of streamMethods) {
-      const impl = streamHandlerImpls[method.name];
-      if (!isStreamImplementation<typeof method, R>(impl)) {
+      const impl = readNamed(streamHandlerImpls, method.name);
+      if (!isFunctionValue(impl)) {
         throw new Error(`Missing implementation for stream method: ${method.name}`);
       }
 
@@ -256,8 +258,8 @@ export function createRpcEndpoint<
       streamListeners.set(
         channel,
         async function handleStreamRequest(
-          event: unknown,
-          rawPayload: unknown,
+          event: IpcInvokeEvent,
+          rawPayload: IpcEncodedValue,
         ): Promise<RpcResponseEnvelope> {
           if (!isRecord(rawPayload)) {
             return toDefectEnvelope("Stream request payload must be an object");
@@ -266,7 +268,7 @@ export function createRpcEndpoint<
           const streamId = rawPayload.streamId;
           const rawData = rawPayload.data;
 
-          if (typeof streamId !== "string" || streamId.length === 0) {
+          if (!isStringValue(streamId) || streamId.length === 0) {
             return toDefectEnvelope("Invalid streamId");
           }
 
@@ -286,8 +288,8 @@ export function createRpcEndpoint<
             const decodeCtx: import("./types.ts").DecodeFailureContext = {
               scope: "stream-request",
               name: method.name,
-              payload: rawData,
-              cause,
+              payload: toDiagnosticCause(rawData),
+              cause: toDiagnosticCause(cause),
             };
             safelyCall(diagnostics?.onDecodeFailure, decodeCtx);
             return toDefectEnvelope(cause, `Stream ${method.name} request decode failed`);
@@ -395,7 +397,7 @@ export function createRpcEndpoint<
             Effect.ensuring(
               Effect.sync(() => {
                 activeStreams.delete(streamId);
-                if (typeof sender.removeListener === "function") {
+                if (sender.removeListener) {
                   sender.removeListener("destroyed", onSenderDestroyed);
                 }
               }),
@@ -404,7 +406,7 @@ export function createRpcEndpoint<
 
           activeStreams.set(streamId, entry);
 
-          if (typeof sender.once === "function") {
+          if (sender.once) {
             sender.once("destroyed", onSenderDestroyed);
           }
 
@@ -413,7 +415,7 @@ export function createRpcEndpoint<
             fiber = runFork(streamEffect);
           } catch (cause) {
             activeStreams.delete(streamId);
-            if (typeof sender.removeListener === "function") {
+            if (sender.removeListener) {
               sender.removeListener("destroyed", onSenderDestroyed);
             }
             return toDefectEnvelope(cause, `Stream ${method.name} failed to start`);
@@ -458,13 +460,13 @@ export function createRpcEndpoint<
 
       // Register cancel handler if we have stream methods
       if (streamMethods.length > 0) {
-        ipc.handle(cancelChannel, (event: unknown, rawPayload: unknown) => {
+        ipc.handle(cancelChannel, (event: IpcInvokeEvent, rawPayload: IpcEncodedValue) => {
           if (!isRecord(rawPayload)) {
             return { cancelled: false };
           }
 
           const streamId = rawPayload.streamId;
-          if (typeof streamId !== "string") return { cancelled: false };
+          if (!isStringValue(streamId)) return { cancelled: false };
 
           const entry = activeStreams.get(streamId);
           if (!entry) return { cancelled: false };
@@ -625,7 +627,7 @@ export function createEventPublisher<
   }
 
   function dispatch(item: QueueItem<Events[number]>): void {
-    let encoded: unknown;
+    let encoded: IpcEncodedValue;
     try {
       encoded = S.encodeSync(item.event.payload)(item.payload);
     } catch (cause) {
@@ -634,13 +636,13 @@ export function createEventPublisher<
       safelyCall(diagnostics?.onDecodeFailure, {
         scope: "event-payload",
         name: item.event.name,
-        payload: item.payload,
-        cause,
+        payload: toDiagnosticCause(item.payload),
+        cause: toDiagnosticCause(cause),
       });
 
       safelyCall(diagnostics?.onDroppedEvent, {
         event: item.event.name,
-        payload: item.payload,
+        payload: toDiagnosticCause(item.payload),
         reason: "encoding_failed",
         queued: queue.length,
         dropped,
@@ -655,7 +657,7 @@ export function createEventPublisher<
 
       safelyCall(diagnostics?.onDroppedEvent, {
         event: item.event.name,
-        payload: item.payload,
+        payload: toDiagnosticCause(item.payload),
         reason: "window_unavailable",
         queued: queue.length,
         dropped,
@@ -671,7 +673,7 @@ export function createEventPublisher<
 
         safelyCall(diagnostics?.onDroppedEvent, {
           event: item.event.name,
-          payload: item.payload,
+          payload: toDiagnosticCause(item.payload),
           reason: "window_unavailable",
           queued: queue.length,
           dropped,
@@ -687,13 +689,13 @@ export function createEventPublisher<
 
         safelyCall(diagnostics?.onDispatchFailure, {
           event: item.event.name,
-          payload: item.payload,
-          cause,
+          payload: toDiagnosticCause(item.payload),
+          cause: toDiagnosticCause(cause),
         });
 
         safelyCall(diagnostics?.onDroppedEvent, {
           event: item.event.name,
-          payload: item.payload,
+          payload: toDiagnosticCause(item.payload),
           reason: "dispatch_failed",
           queued: queue.length,
           dropped,
@@ -739,7 +741,7 @@ export function createEventPublisher<
       if (evicted) {
         safelyCall(diagnostics?.onDroppedEvent, {
           event: evicted.event.name,
-          payload: evicted.payload,
+          payload: toDiagnosticCause(evicted.payload),
           reason: "queue_full",
           queued: queue.length,
           dropped,
@@ -799,7 +801,7 @@ export function createEventPublisher<
     return running;
   }
 
-  function stats(): { readonly queued: number; readonly dropped: number } {
+  function stats(): EventPublisherStats {
     return {
       queued: queue.length,
       dropped,

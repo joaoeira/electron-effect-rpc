@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "bun:test";
@@ -77,5 +78,28 @@ describe("browser-safe imports", () => {
 
     expect([...source.matchAll(electronImportPattern)]).toHaveLength(0);
     expect([...compiled.matchAll(electronImportPattern)]).toHaveLength(0);
+  });
+
+  it("when preload auto-loading is unavailable in ESM, then the public error explains the explicit module option", () => {
+    const script = [
+      'import { createIpcKit, defineContract } from "./dist/index.js";',
+      "const contract = defineContract({ methods: [], events: [] });",
+      "try {",
+      "  createIpcKit({ contract }).preload();",
+      "} catch (error) {",
+      "  console.log(error instanceof Error ? error.message : String(error));",
+      "}",
+    ].join("\n");
+    const result = spawnSync("node", ["--input-type=module"], {
+      cwd: root,
+      encoding: "utf-8",
+      input: script,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(
+      "In ESM preload files, pass it explicitly: ipc.preload({ electronModule: electron }).",
+    );
+    expect(result.stdout).not.toContain("require is not defined");
   });
 });

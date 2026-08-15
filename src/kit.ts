@@ -12,6 +12,7 @@ import {
   createBridgeAdaptersFromBindings,
   exposeIpcBridgeFromBindings,
   resolveElectronRendererBindings,
+  type ElectronModuleCandidate,
 } from "./preload-bridge.ts";
 import { createEventSubscriber, createRpcClient, createStreamRpcClient } from "./renderer.ts";
 import {
@@ -20,6 +21,7 @@ import {
   type ChannelPrefix,
   type EventDecodeMode,
   type EventPublisherDiagnostics,
+  type EventPublisherStats,
   type EventSubscribe,
   type EventSubscriber,
   type EventSubscriberDiagnostics,
@@ -94,7 +96,7 @@ type IpcMainOptions<
 
 type IpcPreloadOptions = {
   readonly global?: string;
-  readonly electronModule?: unknown;
+  readonly electronModule?: ElectronModuleCandidate;
 };
 
 type IpcRendererOptions = {
@@ -118,10 +120,7 @@ export type IpcMainHandle<
     event: E,
     payload: RpcEventPayload<E>,
   ) => Effect.Effect<void, never>;
-  readonly stats: () => {
-    readonly queued: number;
-    readonly dropped: number;
-  };
+  readonly stats: () => EventPublisherStats;
 };
 
 export type IpcKit<
@@ -152,19 +151,25 @@ export type IpcKit<
   };
 };
 
-function loadElectronModule(electronModule: unknown): unknown {
+function loadElectronModule(
+  electronModule: ElectronModuleCandidate | undefined,
+): ElectronModuleCandidate {
   if (electronModule !== undefined) {
     return electronModule;
   }
 
-  if (typeof require === "function") {
+  try {
     return require("electron");
+  } catch (cause) {
+    if (!(cause instanceof ReferenceError)) {
+      throw cause;
+    }
+    throw new Error(
+      "ipc.preload() could not load Electron synchronously. " +
+        "In ESM preload files, pass it explicitly: ipc.preload({ electronModule: electron }).",
+      { cause },
+    );
   }
-
-  throw new Error(
-    "ipc.preload() could not load Electron synchronously. " +
-      "In ESM preload files, pass it explicitly: ipc.preload({ electronModule: electron }).",
-  );
 }
 
 export function createIpcKit<
