@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.10.0 - 2026-08-15
+
 ### Breaking
 
 - The package now requires Effect v4 (`effect@^4.0.0-rc.109`). Effect v3 is no
@@ -31,6 +33,9 @@
 - `ipc.renderer(bridge, { diagnostics })` — renderer-side diagnostics hooks for
   RPC, events, and streams in kit mode.
 - `assertValidChannelPrefix` exported from `electron-effect-rpc/types`.
+- Named structured-clone transport types (`IpcEncodedValue`,
+  `IpcEncodedRecord`, and `DiagnosticCause`) exported from
+  `electron-effect-rpc/types`.
 
 ### Fixed
 
@@ -43,6 +48,12 @@
   schema package instance can't silently turn typed failures into defects.
 - Stream failure-encoding defects now carry the encoding error message instead
   of `[object Object]`.
+- Preload bindings now accept the real Electron module without casts, preserve
+  Electron method receivers, and report a descriptive error when synchronous
+  loading is unavailable in ESM.
+- Protocol envelopes and stream frames preserve structured-clone payloads such
+  as `bigint`, maps, sets, binary values, and cyclic object graphs while leaving
+  domain validation to each contract schema.
 
 ## 0.8.0 and earlier
 
