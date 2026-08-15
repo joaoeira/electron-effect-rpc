@@ -12,8 +12,8 @@ In practice, RPC calls move from renderer to main through a predictable pipeline
 The client created in `src/renderer.ts` encodes request payloads from schema
 types into transport payloads, forwards them through `invoke`, and expects an
 envelope-shaped response. On the main side, `createRpcEndpoint` in `src/main.ts`
-decodes the request, executes an `Effect` handler using an injected runtime, and
-encodes the result back into a response envelope. That envelope can represent a
+decodes the request, executes an `Effect` handler using an injected `Context`,
+and encodes the result back into a response envelope. That envelope can represent a
 successful domain result, a typed domain failure, or a defect. Back in the
 renderer, the response is parsed and decoded into an `Effect` that succeeds
 with the domain result, fails with a typed domain error, or fails with
@@ -63,9 +63,9 @@ interrupted before handlers are removed. A destroyed sender also terminates
 its streams: the per-chunk send interrupts the pipeline when the webContents
 is gone, and when the sender exposes the real Electron event emitter the
 endpoint interrupts the fiber immediately on `destroyed`, so handler fibers
-never outlive closed windows. On the renderer, `Stream.asyncPush`
-drives the consumer with an `addFinalizer` that cleans up the frame dispatcher
-and sends a cancel to main. The stream client has its own `dispose()` method
+never outlive closed windows. On the renderer, Effect v4's `Stream.callback`
+drives the consumer through a queue, with an `addFinalizer` that cleans up the
+frame dispatcher and sends a cancel to main. The stream client has its own `dispose()` method
 that fails any active streams before removing the central frame listener.
 
 Compatibility is handled in the renderer by supporting a dual decode mode for

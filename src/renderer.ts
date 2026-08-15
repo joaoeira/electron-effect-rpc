@@ -1,5 +1,5 @@
 import * as S from "effect/Schema";
-import { Cause, Effect, Exit, Stream } from "effect";
+import { Cause, Effect, Exit, Queue, Result, Stream } from "effect";
 import {
   exitSchemaFor,
   isNoErrorSchema,
@@ -89,14 +89,14 @@ function decodeLegacyExit<M extends AnyMethod>(
         return Effect.succeed(exit.value);
       }
 
-      const failureOption = Cause.failureOption(exit.cause);
+      const failureOption = Cause.findErrorOption(exit.cause);
       if (failureOption._tag === "Some") {
         return Effect.fail<RpcMethodError<M>>(failureOption.value);
       }
 
-      const defectOption = Cause.dieOption(exit.cause);
-      if (defectOption._tag === "Some") {
-        const defect = defectOption.value;
+      const defectResult = Cause.findDefect(exit.cause);
+      if (Result.isSuccess(defectResult)) {
+        const defect = defectResult.success;
         const message = defect instanceof Error ? defect.message : String(defect);
         return Effect.fail(rpcDefect("remote_defect", message, defect));
       }
@@ -339,11 +339,11 @@ export function createEventSubscriber<
   };
 
   const streamEvent = <E extends Events[number]>(event: E): Stream.Stream<RpcEventPayload<E>> =>
-    Stream.asyncPush<RpcEventPayload<E>>((emit) =>
+    Stream.callback<RpcEventPayload<E>>((queue) =>
       Effect.acquireRelease(
         Effect.sync(() =>
           subscribeEvent(event, (payload) => {
-            emit.single(payload);
+            Queue.offerUnsafe(queue, payload);
           }),
         ),
         (unsubscribe) => Effect.sync(unsubscribe),
@@ -427,6 +427,16 @@ export function createStreamRpcClient<
   };
 
   const frameDispatcher = new Map<string, FrameHandler>();
+  const recentlyClosedStreams = new Map<string, (response: unknown) => void>();
+
+  const rememberRecentlyClosed = (streamId: string, report: (response: unknown) => void): void => {
+    recentlyClosedStreams.set(streamId, report);
+    queueMicrotask(() => {
+      if (recentlyClosedStreams.get(streamId) === report) {
+        recentlyClosedStreams.delete(streamId);
+      }
+    });
+  };
 
   // Set up central frame listener
   const centralCleanup = onStreamFrame((raw: unknown) => {
@@ -450,7 +460,14 @@ export function createStreamRpcClient<
     }
 
     const handler = frameDispatcher.get(frame.streamId);
-    if (!handler) return; // stale frame for completed/cancelled stream
+    if (!handler) {
+      const report = recentlyClosedStreams.get(frame.streamId);
+      if (report) {
+        recentlyClosedStreams.delete(frame.streamId);
+        report(raw);
+      }
+      return;
+    }
 
     switch (frame.type) {
       case "data":
@@ -472,6 +489,10 @@ export function createStreamRpcClient<
   });
 
   const streamMethods = contract.streamMethods ?? [];
+  const callbackOptions =
+    streamBuffer.bufferSize === "unbounded"
+      ? undefined
+      : { bufferSize: streamBuffer.bufferSize, strategy: streamBuffer.strategy };
 
   type MutableStreamRpcClient = {
     -readonly [Name in keyof StreamRpcClient<
@@ -490,9 +511,36 @@ export function createStreamRpcClient<
     const caller: StreamRpcCaller<typeof method> = (...args: [StreamInput<typeof method>?]) => {
       const payload: StreamInput<typeof method> = args.length === 0 ? {} : args[0]!;
 
-      return Stream.asyncPush<StreamChunk<typeof method>, StreamMethodError<typeof method>>(
-        (emit) =>
-          Effect.gen(function* () {
+      return Stream.callback<StreamChunk<typeof method>, StreamMethodError<typeof method>>(
+        (queue) => {
+          let queueClosed = false;
+          let postCloseReported = false;
+
+          const reportPostClose = (response: unknown): void => {
+            if (postCloseReported) return;
+            postCloseReported = true;
+            safelyCall(diagnostics?.onProtocolError, {
+              method: method.name,
+              response,
+              cause: new Error(
+                `Stream ${method.name} received a post-close data frame; frame ignored`,
+              ),
+            });
+          };
+
+          const failQueue = (error: StreamMethodError<typeof method>): void => {
+            if (queueClosed) return;
+            queueClosed = true;
+            Queue.failCauseUnsafe(queue, Cause.fail(error));
+          };
+
+          const endQueue = (): void => {
+            if (queueClosed) return;
+            queueClosed = true;
+            Queue.endUnsafe(queue);
+          };
+
+          return Effect.gen(function* () {
             const streamId = crypto.randomUUID();
 
             // Once main has sent a terminal frame (end/error/defect) there is
@@ -513,7 +561,7 @@ export function createStreamRpcClient<
                     cause,
                   };
                   safelyCall(diagnostics?.onDecodeFailure, context);
-                  emit.fail(
+                  failQueue(
                     rpcDefect(
                       "stream_chunk_decode_failed",
                       `Stream ${method.name} chunk decode failed: ${formatUnknown(cause)}`,
@@ -522,30 +570,22 @@ export function createStreamRpcClient<
                   );
                   return;
                 }
-                // `emit.single(...) === false` indicates a closed emitter, not
-                // bounded-buffer overflow.
-                const accepted = emit.single(decoded);
-                if (!accepted) {
+                const accepted = !queueClosed && Queue.offerUnsafe(queue, decoded);
+                if (!accepted && (queueClosed || queue.state._tag !== "Open")) {
                   // Stream has already finished. Remove dispatcher entry on the
                   // first post-close frame to avoid repeated diagnostics.
                   frameDispatcher.delete(streamId);
-                  safelyCall(diagnostics?.onProtocolError, {
-                    method: method.name,
-                    response: rawPayload,
-                    cause: new Error(
-                      `Stream ${method.name} received a post-close data frame; frame ignored`,
-                    ),
-                  });
+                  reportPostClose(rawPayload);
                 }
               },
               end: () => {
                 serverTerminated = true;
-                emit.end();
+                endQueue();
               },
               error: (err) => {
                 serverTerminated = true;
                 if (!decodeTypedError) {
-                  emit.fail(
+                  failQueue(
                     rpcDefect(
                       "stream_error_decode_failed",
                       `Stream ${method.name} received typed error but declares NoError`,
@@ -557,7 +597,7 @@ export function createStreamRpcClient<
 
                 try {
                   const decoded = decodeNonEmptyError(method.err, err.data);
-                  emit.fail(decoded);
+                  failQueue(decoded);
                 } catch (cause) {
                   const errContext: import("./types.ts").DecodeFailureContext = {
                     scope: "stream-error",
@@ -566,7 +606,7 @@ export function createStreamRpcClient<
                     cause,
                   };
                   safelyCall(diagnostics?.onDecodeFailure, errContext);
-                  emit.fail(
+                  failQueue(
                     rpcDefect(
                       "stream_error_decode_failed",
                       `Stream ${method.name} error decode failed: ${formatUnknown(cause)}`,
@@ -579,7 +619,7 @@ export function createStreamRpcClient<
                 if (fromServer) {
                   serverTerminated = true;
                 }
-                emit.fail(rpcDefect("remote_defect", message, undefined));
+                failQueue(rpcDefect("remote_defect", message, undefined));
               },
             });
 
@@ -587,6 +627,9 @@ export function createStreamRpcClient<
             yield* Effect.addFinalizer(() =>
               Effect.sync(() => {
                 frameDispatcher.delete(streamId);
+                if (queueClosed && !postCloseReported) {
+                  rememberRecentlyClosed(streamId, reportPostClose);
+                }
               }).pipe(
                 Effect.andThen(
                   Effect.suspend(() =>
@@ -643,8 +686,17 @@ export function createStreamRpcClient<
                 ),
               );
             }
-          }),
-        streamBuffer,
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.sync(() => {
+                if (queueClosed) return;
+                queueClosed = true;
+                Queue.failCauseUnsafe(queue, cause);
+              }),
+            ),
+          );
+        },
+        callbackOptions,
       );
     };
 
@@ -657,6 +709,7 @@ export function createStreamRpcClient<
       handler.defect("Stream client disposed");
       frameDispatcher.delete(streamId);
     }
+    recentlyClosedStreams.clear();
     centralCleanup();
   }
 

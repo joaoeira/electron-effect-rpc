@@ -180,7 +180,7 @@ type RootModule = typeof import("../src/index.ts");
 type _NoCreateRpcClientFromRoot = RootModule["createRpcClient"];
 
 // object_typed_requests_still_require_an_argument
-const ObjReq = rpc("ObjReq", S.Object, S.String);
+const ObjReq = rpc("ObjReq", S.ObjectKeyword, S.String);
 const objContract = defineContract({
   methods: [ObjReq] as const,
   events: [] as const,

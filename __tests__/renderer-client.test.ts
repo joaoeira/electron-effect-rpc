@@ -15,7 +15,7 @@ function expectFailure<E>(exit: Exit.Exit<unknown, E>): E {
     throw new Error("Expected exit failure.");
   }
 
-  const failure = Cause.failureOption(exit.cause);
+  const failure = Cause.findErrorOption(exit.cause);
   if (failure._tag !== "Some") {
     throw new Error("Expected a regular failure in Cause.");
   }
@@ -458,7 +458,7 @@ describe("createRpcClient", () => {
     const exit = await Effect.runPromiseExit(noArgCaller());
     const defect = expectRpcDefect(exit);
     expect(defect.code).toBe("request_encoding_failed");
-    expect(defect.message).toContain("Expected null, actual {}");
+    expect(defect.message).toContain("Expected null");
     expect(invoke.invocations).toEqual([]);
   });
 
@@ -546,7 +546,7 @@ describe("createRpcClient", () => {
   it("when decode mode is dual and legacy response is a defect, then the client fails with RpcDefectError", async () => {
     const encodeLegacyExit = S.encodeUnknownSync(exitSchemaFor(Add));
     const invoke = createInvokeStub(async () => {
-      const exit = await Effect.runPromiseExit(Effect.dieMessage("legacy-die"));
+      const exit = await Effect.runPromiseExit(Effect.die(new Error("legacy-die")));
       return encodeLegacyExit(exit);
     });
 

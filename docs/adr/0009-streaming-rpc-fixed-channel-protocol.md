@@ -35,12 +35,12 @@ and `event()`. The protocol uses:
    `streamHandlers` maps to `Stream`-returning functions. No union types or
    conditional mapped types.
 
-5. **Stream.asyncPush on renderer:** The renderer stream client uses
-   `Stream.asyncPush` with `Effect.addFinalizer` for deterministic cleanup on
-   all exit paths (success, failure, interruption). Buffer policy is configurable
-   per stream client (`streamBuffer`), and defaults to `bufferSize: "unbounded"`
-   for lossless delivery by default. Bounded policies are lossy by design, and
-   terminal signals may be silently dropped under sustained pressure.
+5. **Stream.callback on renderer:** The Effect v4 renderer client uses
+   `Stream.callback` with its queue APIs and `Effect.addFinalizer` for
+   deterministic cleanup on all exit paths (success, failure, interruption).
+   Buffer policy is configurable per stream client (`streamBuffer`) and defaults
+   to `bufferSize: "unbounded"` for lossless delivery. Bounded policies are lossy
+   for chunks, while queue completion and failure signals remain reliable.
 
 ## Consequences
 

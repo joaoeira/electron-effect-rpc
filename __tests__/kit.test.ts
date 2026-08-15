@@ -1,7 +1,7 @@
 import { describe, expect, it, mock } from "bun:test";
 import * as S from "effect/Schema";
 import { Effect } from "effect";
-import * as Runtime from "effect/Runtime";
+import * as ContextModule from "effect/Context";
 import { createIpcKit, defineContract, event, rpc } from "../src/index.ts";
 import type { ChannelPrefix, IpcMainLike } from "../src/types.ts";
 
@@ -275,7 +275,7 @@ describe("createIpcKit", () => {
       handlers: {
         Ping: () => Effect.succeed({ ok: true }),
       },
-      runtime: Runtime.defaultRuntime,
+      context: ContextModule.empty(),
       getWindows: () => [eventHarness.window],
     });
     main.start();
@@ -316,7 +316,7 @@ describe("createIpcKit", () => {
       handlers: {
         Ping: () => Effect.succeed({ ok: true }),
       },
-      runtime: Runtime.defaultRuntime,
+      context: ContextModule.empty(),
       getWindows: () => [],
     });
 
@@ -356,7 +356,7 @@ describe("createIpcKit", () => {
         removeHandler: () => {},
       },
       handlers: {},
-      runtime: Runtime.defaultRuntime,
+      context: ContextModule.empty(),
       getWindows: () => [eventHarness.window],
     });
     main.start();

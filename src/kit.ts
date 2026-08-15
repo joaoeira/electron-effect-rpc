@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import type * as Runtime from "effect/Runtime";
+import type * as Context from "effect/Context";
 import type {
   AnyEvent,
   AnyMethod,
@@ -82,7 +82,7 @@ type IpcMainOptions<
 > = {
   readonly ipcMain: IpcMainLike;
   readonly handlers: Implementations<C, R>;
-  readonly runtime: Runtime.Runtime<R>;
+  readonly context: Context.Context<R>;
   readonly getWindows: () => ReadonlyArray<RendererWindowLike>;
   readonly maxQueueSize?: number;
   readonly streamHandlers?: StreamImplementations<C, R>;
@@ -199,7 +199,7 @@ export function createIpcKit<
     mainOptions: IpcMainOptions<RpcContract<Methods, Events, StreamMethods>, R>,
   ): IpcMainHandle<RpcContract<Methods, Events, StreamMethods>> => {
     const endpoint = createRpcEndpoint(contract, mainOptions.ipcMain, mainOptions.handlers, {
-      runtime: mainOptions.runtime,
+      context: mainOptions.context,
       channelPrefix,
       diagnostics: mainOptions.diagnostics?.rpc,
       streamHandlers: mainOptions.streamHandlers,

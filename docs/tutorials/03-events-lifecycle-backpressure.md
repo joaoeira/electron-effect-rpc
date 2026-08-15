@@ -11,8 +11,10 @@ bugs. This guide focuses on those failure modes.
 Use that explicitly in your app bootstrap:
 
 ```ts
+import { Context } from "effect";
+
 const endpoint = createRpcEndpoint(contract, ipcMain, implementations, {
-  runtime: Runtime.defaultRuntime,
+  context: Context.empty(),
 });
 
 const publisher = createEventPublisher(contract, {

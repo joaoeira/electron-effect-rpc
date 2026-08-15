@@ -1,6 +1,7 @@
 import * as S from "effect/Schema";
+import * as SchemaAST from "effect/SchemaAST";
 
-export type SchemaNoContext = S.Schema.AnyNoContext;
+export type SchemaNoContext = S.Codec<any, any, never, never>;
 
 export const NoError = S.Never;
 export type NoError = typeof NoError;
@@ -10,7 +11,7 @@ export type ErrorSchema = SchemaNoContext | NoError;
 export function isNoErrorSchema(schema: ErrorSchema): schema is NoError {
   // Also match by AST tag so a Never schema from a second copy of the
   // schema package (npm dedup failure) is still treated as NoError.
-  return schema === NoError || schema.ast._tag === "NeverKeyword";
+  return schema === NoError || SchemaAST.isNever(schema.ast);
 }
 
 export interface RpcMethod<
@@ -66,12 +67,7 @@ export const exitSchemaFor = <
   Err extends ErrorSchema,
 >(
   method: RpcMethod<Name, Req, Res, Err>,
-) =>
-  S.Exit({
-    success: method.res,
-    failure: method.err,
-    defect: S.Defect,
-  });
+) => S.toCodecJson(S.Exit(method.res, method.err, S.Defect()));
 
 export interface StreamRpcMethod<
   Name extends string,
@@ -234,7 +230,7 @@ export function defineContract(input: {
     throw new Error(`Duplicate RPC method name(s): ${duplicateMethods.join(", ")}`);
   }
 
-  const duplicateEvents = collectDuplicates(events.map((event) => event.name));
+  const duplicateEvents = collectDuplicates(events.map((rpcEvent) => rpcEvent.name));
   if (duplicateEvents.length > 0) {
     throw new Error(`Duplicate RPC event name(s): ${duplicateEvents.join(", ")}`);
   }

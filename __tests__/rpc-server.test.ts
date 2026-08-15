@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import * as S from "effect/Schema";
 import { Context, Effect } from "effect";
-import * as Runtime from "effect/Runtime";
+import * as ContextModule from "effect/Context";
 import { defineContract, rpc } from "../src/contract.ts";
 import { createRpcEndpoint } from "../src/main.ts";
 import { isRecord, parseRpcResponseEnvelope } from "../src/protocol.ts";
@@ -59,7 +59,7 @@ describe("createRpcEndpoint", () => {
         Fail: () => Effect.fail(new DomainError({ message: "denied" })),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
       },
     );
 
@@ -88,7 +88,7 @@ describe("createRpcEndpoint", () => {
           Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
         },
         {
-          runtime: Runtime.defaultRuntime,
+          context: ContextModule.empty(),
         },
       ),
     ).toThrow(/Missing implementation for RPC method: Fail/);
@@ -108,7 +108,7 @@ describe("createRpcEndpoint", () => {
           Extra: () => Effect.succeed({ ok: true }),
         },
         {
-          runtime: Runtime.defaultRuntime,
+          context: ContextModule.empty(),
         },
       ),
     ).toThrow(/unknown RPC method: Extra/);
@@ -125,7 +125,7 @@ describe("createRpcEndpoint", () => {
         Fail: () => Effect.fail(new DomainError({ message: "denied" })),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         channelPrefix: {
           rpc: "rpc-custom/",
           event: "evt-custom/",
@@ -149,7 +149,7 @@ describe("createRpcEndpoint", () => {
         Fail: () => Effect.fail(new DomainError({ message: "denied" })),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
       },
     );
 
@@ -176,7 +176,7 @@ describe("createRpcEndpoint", () => {
         Fail: () => Effect.fail(new DomainError({ message: "denied" })),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
       },
     );
 
@@ -210,7 +210,7 @@ describe("createRpcEndpoint", () => {
         Fail: () => Effect.fail(new DomainError({ message: "denied" })),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         diagnostics: {
           onDecodeFailure: (context) => {
             decodeFailures.push(context);
@@ -241,7 +241,7 @@ describe("createRpcEndpoint", () => {
         Fail: () => Effect.fail(new DomainError({ message: "denied" })),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         diagnostics: {
           onDecodeFailure: (context) => {
             if (isRecord(context)) {
@@ -282,7 +282,7 @@ describe("createRpcEndpoint", () => {
           Effect.fail(new DomainError({ message: "typed failure on NoError method" })),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
       },
     );
 
@@ -308,10 +308,10 @@ describe("createRpcEndpoint", () => {
       dieContract,
       ipcMain,
       {
-        DieMethod: () => Effect.dieMessage("die boom"),
+        DieMethod: () => Effect.die(new Error("die boom")),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
       },
     );
 
@@ -340,7 +340,7 @@ describe("createRpcEndpoint", () => {
         InterruptMethod: () => Effect.interrupt,
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
       },
     );
 
@@ -371,7 +371,7 @@ describe("createRpcEndpoint", () => {
         SuccessEncodeBreak: () => Effect.succeed({ sum: "bad" }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         diagnostics: {
           onProtocolError: (context) => {
             protocolErrors.push(context);
@@ -410,7 +410,7 @@ describe("createRpcEndpoint", () => {
         FailureEncodeBreak: () => Effect.fail({ _tag: "DomainError" }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         diagnostics: {
           onProtocolError: (context) => {
             protocolErrors.push(context);
@@ -439,7 +439,7 @@ describe("createRpcEndpoint", () => {
         Fail: () => Effect.fail(new DomainError({ message: "denied" })),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         diagnostics: {
           onDecodeFailure: (context) => {
             if (isRecord(context)) {
@@ -480,7 +480,7 @@ describe("createRpcEndpoint", () => {
         Broken: () => Effect.succeed({ sum: "bad" }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         diagnostics: {
           onProtocolError: (context) => {
             if (isRecord(context)) {
@@ -519,7 +519,7 @@ describe("createRpcEndpoint", () => {
         Broken: () => Effect.succeed({ sum: "bad" }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         diagnostics: {
           onProtocolError: () => {
             throw new Error("diagnostics crashed");
@@ -551,7 +551,7 @@ describe("createRpcEndpoint", () => {
         Fail: () => Effect.fail(new DomainError({ message: "denied" })),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         diagnostics: {
           onDecodeFailure: (context) => {
             decodeFailures.push(context);
@@ -593,7 +593,7 @@ describe("createRpcEndpoint", () => {
         },
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
       },
     );
 
@@ -622,7 +622,7 @@ describe("createRpcEndpoint", () => {
         Fail: () => Effect.fail(new DomainError({ message: "denied" })),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
       },
     );
 
@@ -656,7 +656,7 @@ describe("createRpcEndpoint", () => {
         Fail: () => Effect.fail(new DomainError({ message: "denied" })),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
       },
     );
 
@@ -686,7 +686,7 @@ describe("createRpcEndpoint", () => {
         Fail: () => Effect.fail(new DomainError({ message: "denied" })),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
       },
     );
 
@@ -698,8 +698,8 @@ describe("createRpcEndpoint", () => {
     expect(removeCalls).toEqual(expect.arrayContaining(["rpc/Add", "rpc/Fail"]));
   });
 
-  it("when a runtime provides services, then handlers resolve those services through the provided runtime", async () => {
-    class Offset extends Context.Tag("Offset")<Offset, number>() {}
+  it("when a context provides services, then handlers resolve those services through the provided context", async () => {
+    class Offset extends Context.Service<Offset, number>()("Offset") {}
 
     const WithRuntime = rpc(
       "WithRuntime",
@@ -712,7 +712,7 @@ describe("createRpcEndpoint", () => {
     });
     const { ipcMain, handlers } = createIpcMainStub();
 
-    const runtime = Runtime.defaultRuntime.pipe(Runtime.provideService(Offset, 5));
+    const context = Context.make(Offset, 5);
 
     const endpoint = createRpcEndpoint(
       runtimeContract,
@@ -721,11 +721,11 @@ describe("createRpcEndpoint", () => {
         WithRuntime: ({ a, b }) =>
           Effect.contextWith((ctx) => {
             const offset = Context.get(ctx, Offset);
-            return { sum: a + b + offset };
+            return Effect.succeed({ sum: a + b + offset });
           }),
       },
       {
-        runtime,
+        context,
       },
     );
 
@@ -764,7 +764,7 @@ describe("createRpcEndpoint", () => {
           ),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
       },
     );
 
@@ -813,7 +813,7 @@ describe("createRpcEndpoint", () => {
         Fail: () => Effect.fail(new DomainError({ message: "denied" })),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
       },
     );
 
@@ -847,7 +847,7 @@ describe("createRpcEndpoint", () => {
         Fail: () => Effect.fail(new DomainError({ message: "denied" })),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
       },
     );
 
@@ -875,7 +875,7 @@ describe("createRpcEndpoint", () => {
         Fail: () => Effect.fail(new DomainError({ message: "denied" })),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
       },
     );
 
@@ -902,7 +902,7 @@ describe("handler context", () => {
         WhoAmI: (_input, context) => Effect.succeed({ senderId: context.sender?.id ?? -1 }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
       },
     );
 

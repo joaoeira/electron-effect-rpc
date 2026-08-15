@@ -4,24 +4,21 @@
 
 ### Breaking
 
-- Schemas now come from `effect/Schema` (Effect core) instead of the deprecated
-  `@effect/schema` package. The `@effect/schema` peer dependency was removed and
-  the `effect` peer floor raised to `>=3.10.0`. Update contract imports:
-
-  ```ts
-  // before
-  import * as S from "@effect/schema/Schema";
-  // after
-  import * as S from "effect/Schema";
-  ```
-
+- The package now requires Effect v4 (`effect@^4.0.0-rc.109`). Effect v3 is no
+  longer supported.
+- `RpcEndpointOptions.runtime` and `ipc.main({ runtime })` were replaced by
+  `context`, which accepts a v4 `Context.Context<R>`. Use `Context.empty()` when
+  handlers require no application services.
+- Renderer streams now use Effect v4's `Stream.callback` and `Queue` APIs.
+- Cause extraction, fiber interruption, legacy `Exit` codecs, and schema
+  constraints were migrated to their Effect v4 equivalents.
 - `event()` no longer accepts a third `context` schema argument. It was never
   read by the publisher or subscriber; remove it from any `event(...)` calls.
 - `channelPrefix.rpc` and `channelPrefix.event` must now differ; identical
   prefixes throw at construction time.
 - Providing `streamHandlers` when the contract defines no `streamMethods` now
   throws instead of being silently ignored.
-- Methods whose request schema type is `object` (e.g. `S.Object`) now require
+- Methods whose request schema type is `object` (e.g. `S.ObjectKeyword`) now require
   an argument at the call site; previously the client generated a zero-arg
   caller that always sent `{}`.
 

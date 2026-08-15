@@ -42,8 +42,7 @@ Create an endpoint and a publisher during app startup, then explicitly call
 
 ```ts
 import { app, ipcMain } from "electron";
-import { Effect } from "effect";
-import * as Runtime from "effect/Runtime";
+import { Context, Effect } from "effect";
 import { createEventPublisher, createRpcEndpoint } from "electron-effect-rpc/main";
 import { contract, WorkUnitProgress } from "./contract.ts";
 
@@ -57,7 +56,7 @@ const endpoint = createRpcEndpoint(
       }),
   },
   {
-    runtime: Runtime.defaultRuntime,
+    context: Context.empty(),
   },
 );
 
@@ -77,8 +76,8 @@ void Effect.runPromise(
 );
 ```
 
-You must provide a runtime in `createRpcEndpoint`. That is deliberate: runtime
-ownership stays explicit instead of being hidden in global state.
+You must provide a service `Context` in `createRpcEndpoint`. That is deliberate:
+dependency ownership stays explicit instead of being hidden in global state.
 
 ## Step 3: Expose a narrow preload bridge
 

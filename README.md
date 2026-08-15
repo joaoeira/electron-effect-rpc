@@ -24,7 +24,7 @@ ESM-capable build pipeline.
 - Schema validation on every IPC crossing, in both directions.
 - Typed domain errors in the Effect error channel; transport problems as `RpcDefectError` with stable codes.
 - Streaming RPC: handlers return `Stream.Stream`, clients consume `Stream.Stream`, cancellation propagates.
-- Main handlers are Effects, run on a runtime you inject (so your services/layers are available).
+- Main handlers are Effects, run with an injected `Context` (so your services are available).
 - Explicit lifecycle handles (`start`/`stop`/`dispose`) and bounded event queue backpressure.
 - Structured diagnostics hooks for decode/protocol/dispatch failures.
 
@@ -32,7 +32,7 @@ ESM-capable build pipeline.
 
 - Electron >= 28 with context isolation enabled.
 - ESM-capable bundling.
-- Peer dependencies: `effect` (>=3.10), `electron`.
+- Peer dependencies: `effect` (`^4.0.0-rc.109`), `electron`.
 
 ## Installation
 
@@ -92,8 +92,7 @@ export const ipc = createIpcKit({
 ```ts
 import path from "node:path";
 import { app, BrowserWindow, ipcMain } from "electron";
-import { Effect, Stream } from "effect";
-import * as Runtime from "effect/Runtime";
+import { Context, Effect, Stream } from "effect";
 import { ipc, WorkUnitProgress } from "./shared-ipc.ts";
 
 const mainWindow = new BrowserWindow({
@@ -111,7 +110,7 @@ const mainRpc = ipc.main({
     StreamAiGeneration: ({ prompt }) =>
       Stream.fromIterable(prompt.split(" ")).pipe(Stream.map((word) => ({ delta: word + " " }))),
   },
-  runtime: Runtime.defaultRuntime,
+  context: Context.empty(),
   getWindows: () => [mainWindow],
 });
 
@@ -264,10 +263,10 @@ letting raw exceptions (paths, query fragments) become defects.
 handler produces them; there is no acknowledgment across the IPC boundary. The
 renderer buffers with `bufferSize: "unbounded"` by default, which is lossless
 but means a fast producer with a slow consumer grows renderer memory. Bounded
-buffers (`dropping`/`sliding`) are lossy by design and, with current Effect
-`Stream.asyncPush` internals, can lose terminal signals under sustained
-pressure. Rate-limit fast producers in the handler (`Stream.throttle`,
-batching) rather than relying on a bounded renderer buffer.
+buffers (`dropping`/`sliding`) are lossy by design, while completion and failure
+signals remain reliable through Effect v4's `Stream.callback` queue. Rate-limit
+fast producers in the handler (`Stream.throttle`, batching) rather than relying
+on a bounded renderer buffer.
 
 **Unary RPC cancellation.** Interrupting the renderer-side Effect of a
 client call (e.g. via `Effect.timeout`) does not abort the main-side handler;

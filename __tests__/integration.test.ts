@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import * as S from "effect/Schema";
 import { Cause, Effect, Exit } from "effect";
-import * as Runtime from "effect/Runtime";
+import * as ContextModule from "effect/Context";
 import { defineContract, event, rpc } from "../src/contract.ts";
 import { createEventPublisher, createRpcEndpoint } from "../src/main.ts";
 import { createEventSubscriber, createRpcClient, RpcDefectError } from "../src/renderer.ts";
@@ -120,10 +120,10 @@ describe("integration", () => {
       {
         Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
         Fail: () => Effect.fail(new AccessDeniedError({ message: "denied" })),
-        Crash: () => Effect.dieMessage("boom"),
+        Crash: () => Effect.die(new Error("boom")),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
       },
     );
     endpoint.start();
@@ -137,7 +137,7 @@ describe("integration", () => {
     if (Exit.isSuccess(failExit)) {
       throw new Error("Expected typed failure.");
     }
-    const failCause = Cause.failureOption(failExit.cause);
+    const failCause = Cause.findErrorOption(failExit.cause);
     if (failCause._tag !== "Some") {
       throw new Error("Expected regular failure cause.");
     }
@@ -147,7 +147,7 @@ describe("integration", () => {
     if (Exit.isSuccess(crashExit)) {
       throw new Error("Expected defect failure.");
     }
-    const crashFailure = Cause.failureOption(crashExit.cause);
+    const crashFailure = Cause.findErrorOption(crashExit.cause);
     if (crashFailure._tag !== "Some") {
       throw new Error("Expected regular failure cause.");
     }
@@ -173,7 +173,7 @@ describe("integration", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         channelPrefix: prefix,
       },
     );
@@ -254,7 +254,7 @@ describe("integration", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
       },
     );
     const publisher = createEventPublisher(contract, {

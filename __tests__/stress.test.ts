@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import * as S from "effect/Schema";
 import { Effect } from "effect";
-import * as Runtime from "effect/Runtime";
+import * as ContextModule from "effect/Context";
 import { defineContract, event, rpc } from "../src/contract.ts";
 import { createEventPublisher, createRpcEndpoint } from "../src/main.ts";
 import { createRpcClient } from "../src/renderer.ts";
@@ -60,7 +60,7 @@ describe("stress", () => {
         Add: ({ a, b }) => Effect.succeed({ sum: a + b }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
       },
     );
     endpoint.start();

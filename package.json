@@ -1,7 +1,7 @@
 {
   "name": "electron-effect-rpc",
   "version": "0.9.0",
-  "description": "Typed IPC RPC for Electron, built on Effect and @effect/schema",
+  "description": "Typed IPC RPC for Electron, built on Effect",
   "keywords": [
     "effect",
     "electron",
@@ -70,14 +70,14 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "bun-types": "^1.1.0",
-    "effect": "^3.11.0",
+    "effect": "^4.0.0-rc.109",
     "electron": "^38.0.0",
     "oxfmt": "^0.34.0",
     "oxlint": "^1.49.0",
     "typescript": "^5.7.0"
   },
   "peerDependencies": {
-    "effect": ">=3.10.0",
+    "effect": "^4.0.0-rc.109",
     "electron": ">=28.0.0"
   },
   "engines": {

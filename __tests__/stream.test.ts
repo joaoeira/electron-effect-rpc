@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import * as S from "effect/Schema";
 import { Cause, Effect, Stream } from "effect";
-import * as Runtime from "effect/Runtime";
+import * as ContextModule from "effect/Context";
 import { defineContract, rpc, streamRpc } from "../src/contract.ts";
 import { createRpcEndpoint } from "../src/main.ts";
 import { isRecord, parseStreamFrame, type StreamFrame } from "../src/protocol.ts";
@@ -370,7 +370,7 @@ describe("createRpcEndpoint with streamHandlers", () => {
           Ping: () => Effect.succeed({ ok: true }),
         },
         {
-          runtime: Runtime.defaultRuntime,
+          context: ContextModule.empty(),
           streamHandlers: {
             // @ts-expect-error contract defines no stream methods
             StreamAdd: () => Stream.empty,
@@ -390,7 +390,7 @@ describe("createRpcEndpoint with streamHandlers", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           StreamAdd: ({ count }) =>
             Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
@@ -417,7 +417,7 @@ describe("createRpcEndpoint with streamHandlers", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           StreamAdd: ({ count }) =>
             Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
@@ -441,7 +441,7 @@ describe("createRpcEndpoint with streamHandlers", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           StreamAdd: ({ count }) =>
             Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
@@ -495,7 +495,7 @@ describe("createRpcEndpoint with streamHandlers", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           StreamAdd: ({ count }) =>
             Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
@@ -544,7 +544,7 @@ describe("createRpcEndpoint with streamHandlers", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           StreamAdd: ({ count }) =>
             Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
@@ -573,12 +573,9 @@ describe("createRpcEndpoint with streamHandlers", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
-          StreamAdd: () =>
-            Stream.fromIterable(Array.from({ length: 100000 }, (_, i) => ({ value: i }))).pipe(
-              Stream.tap(() => Effect.yieldNow()),
-            ),
+          StreamAdd: () => Stream.never,
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -619,12 +616,9 @@ describe("createRpcEndpoint with streamHandlers", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
-          StreamAdd: () =>
-            Stream.fromIterable(Array.from({ length: 100000 }, (_, i) => ({ value: i }))).pipe(
-              Stream.tap(() => Effect.yieldNow()),
-            ),
+          StreamAdd: () => Stream.never,
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -662,7 +656,7 @@ describe("createRpcEndpoint with streamHandlers", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           StreamAdd: ({ count }) =>
             Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
@@ -690,7 +684,7 @@ describe("createRpcEndpoint with streamHandlers", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           StreamAdd: ({ count }) =>
             Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
@@ -724,7 +718,7 @@ describe("stream rpc end-to-end", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           StreamAdd: ({ count }) =>
             Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
@@ -768,7 +762,7 @@ describe("stream rpc end-to-end", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           StreamAdd: ({ count }) =>
             Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
@@ -804,7 +798,7 @@ describe("stream rpc end-to-end", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           StreamAdd: ({ count }) =>
             Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
@@ -849,7 +843,7 @@ describe("stream rpc end-to-end", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           StreamAdd: ({ count }) =>
             Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
@@ -895,7 +889,7 @@ describe("stream rpc end-to-end", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           StreamAdd: () =>
             Stream.fromEffect(
@@ -931,7 +925,7 @@ describe("stream rpc end-to-end", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           StreamAdd: ({ count }) =>
             Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
@@ -965,7 +959,7 @@ describe("stream rpc end-to-end", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           StreamAdd: ({ count }) =>
             Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
@@ -1018,7 +1012,7 @@ describe("main-side stream edge cases", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           StreamAdd: ({ count }) =>
             Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))).pipe(
@@ -1077,10 +1071,10 @@ describe("main-side stream edge cases", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           StreamAdd: () =>
-            Stream.repeatEffect(
+            Stream.fromEffectRepeat(
               Effect.sync(() => {
                 pulls += 1;
                 return { value: pulls };
@@ -1142,7 +1136,7 @@ describe("main-side stream edge cases", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           // Never emits a chunk, so the per-chunk destroyed check never runs
           StreamAdd: () => Stream.never,
@@ -1186,12 +1180,9 @@ describe("main-side stream edge cases", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
-          StreamAdd: () =>
-            Stream.fromIterable(Array.from({ length: 100000 }, (_, i) => ({ value: i }))).pipe(
-              Stream.tap(() => Effect.yieldNow()),
-            ),
+          StreamAdd: () => Stream.never,
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -1235,12 +1226,9 @@ describe("main-side stream edge cases", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
-          StreamAdd: () =>
-            Stream.fromIterable(Array.from({ length: 100000 }, (_, i) => ({ value: i }))).pipe(
-              Stream.tap(() => Effect.yieldNow()),
-            ),
+          StreamAdd: () => Stream.never,
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -1272,7 +1260,7 @@ describe("main-side stream edge cases", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           // @ts-expect-error intentionally wrong stream return type to test defect handling
           StreamAdd: () => Stream.fromEffect(Effect.die("handler crashed")),
@@ -1320,7 +1308,7 @@ describe("main-side stream edge cases", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           StreamAdd: ({ count }) =>
             Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))),
@@ -1366,10 +1354,10 @@ describe("main-side stream edge cases", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           StreamAdd: () =>
-            Stream.repeatEffect(Effect.sleep("10 millis").pipe(Effect.as({ value: 1 }))),
+            Stream.fromEffectRepeat(Effect.sleep("10 millis").pipe(Effect.as({ value: 1 }))),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },
@@ -1425,7 +1413,7 @@ describe("main-side stream edge cases", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           // @ts-expect-error StreamAdd is NoError, but we force a failure
           StreamAdd: () => Stream.fail(new Error("unexpected failure")),
@@ -1473,7 +1461,7 @@ describe("main-side stream edge cases", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         diagnostics: {
           onDecodeFailure: (ctx) => {
             decodeFailures.push({ scope: ctx.scope, name: ctx.name });
@@ -1516,7 +1504,7 @@ describe("renderer-side stream edge cases", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           StreamAdd: ({ count }) =>
             Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))).pipe(
@@ -1561,7 +1549,7 @@ describe("renderer-side stream edge cases", () => {
     expect(exit._tag).toBe("Failure");
 
     if (exit._tag === "Failure") {
-      const error = Cause.failureOption(exit.cause);
+      const error = Cause.findErrorOption(exit.cause);
       expect(error._tag).toBe("Some");
       if (error._tag === "Some") {
         const defect = asRpcDefect(error.value);
@@ -1583,7 +1571,7 @@ describe("renderer-side stream edge cases", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           StreamAdd: () =>
             Stream.fromEffect(
@@ -1615,7 +1603,7 @@ describe("renderer-side stream edge cases", () => {
     expect(exit._tag).toBe("Failure");
 
     if (exit._tag === "Failure") {
-      const error = Cause.failureOption(exit.cause);
+      const error = Cause.findErrorOption(exit.cause);
       expect(error._tag).toBe("Some");
       if (error._tag === "Some") {
         const defect = asRpcDefect(error.value);
@@ -1648,7 +1636,7 @@ describe("renderer-side stream edge cases", () => {
     expect(exit._tag).toBe("Failure");
 
     if (exit._tag === "Failure") {
-      const error = Cause.failureOption(exit.cause);
+      const error = Cause.findErrorOption(exit.cause);
       expect(error._tag).toBe("Some");
       if (error._tag === "Some") {
         const defect = asRpcDefect(error.value);
@@ -1669,7 +1657,7 @@ describe("renderer-side stream edge cases", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           StreamAdd: ({ count }) =>
             Stream.fromIterable(Array.from({ length: count }, (_, i) => ({ value: i }))).pipe(
@@ -1718,7 +1706,7 @@ describe("renderer-side stream edge cases", () => {
     expect(exit._tag).toBe("Failure");
 
     if (exit._tag === "Failure") {
-      const error = Cause.failureOption(exit.cause);
+      const error = Cause.findErrorOption(exit.cause);
       expect(error._tag).toBe("Some");
       if (error._tag === "Some") {
         const defect = asRpcDefect(error.value);
@@ -2010,7 +1998,7 @@ describe("stream rpc e2e edge cases", () => {
     expect(exit._tag).toBe("Failure");
 
     if (exit._tag === "Failure") {
-      const error = Cause.failureOption(exit.cause);
+      const error = Cause.findErrorOption(exit.cause);
       expect(error._tag).toBe("Some");
       if (error._tag === "Some") {
         const defect = asRpcDefect(error.value);
@@ -2032,10 +2020,10 @@ describe("stream rpc e2e edge cases", () => {
         Ping: () => Effect.succeed({ ok: true }),
       },
       {
-        runtime: Runtime.defaultRuntime,
+        context: ContextModule.empty(),
         streamHandlers: {
           StreamAdd: () =>
-            Stream.repeatEffect(Effect.sleep("10 millis").pipe(Effect.as({ value: 1 }))),
+            Stream.fromEffectRepeat(Effect.sleep("10 millis").pipe(Effect.as({ value: 1 }))),
           StreamFail: () => Stream.fail(new StreamError({ message: "denied" })),
         },
       },

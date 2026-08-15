@@ -1,7 +1,7 @@
 import * as S from "effect/Schema";
 import { Effect } from "effect";
 import type * as Fx from "effect/Effect";
-import * as Runtime from "effect/Runtime";
+import * as ContextModule from "effect/Context";
 import { createIpcKit, defineContract, event, rpc } from "../src/index.ts";
 import type { IpcMainLike, RpcDefectError } from "../src/types.ts";
 
@@ -121,7 +121,7 @@ const mainOk = kit.main({
     Ping: () => Effect.succeed({ ok: true }),
     Echo: ({ message }) => Effect.succeed({ echoed: message }),
   },
-  runtime: Runtime.defaultRuntime,
+  context: ContextModule.empty(),
   getWindows: () => [],
 });
 
@@ -136,7 +136,7 @@ kit.main({
   handlers: {
     Ping: () => Effect.succeed({ ok: true }),
   },
-  runtime: Runtime.defaultRuntime,
+  context: ContextModule.empty(),
   getWindows: () => [],
 });
 
@@ -148,6 +148,6 @@ kit.main({
     // @ts-expect-error Extra handler key should be rejected.
     Extra: () => Effect.succeed({ ok: true }),
   },
-  runtime: Runtime.defaultRuntime,
+  context: ContextModule.empty(),
   getWindows: () => [],
 });

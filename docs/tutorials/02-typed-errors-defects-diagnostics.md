@@ -96,8 +96,10 @@ const client = createRpcClient(contract, {
 On main side:
 
 ```ts
+import { Context } from "effect";
+
 const endpoint = createRpcEndpoint(contract, ipcMain, implementations, {
-  runtime: Runtime.defaultRuntime,
+  context: Context.empty(),
   diagnostics: {
     onDecodeFailure: (context) => {
       logger.warn("main-decode-failure", context);

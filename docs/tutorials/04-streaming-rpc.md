@@ -44,8 +44,7 @@ Stream handlers return `Stream.Stream<Chunk, Err, R>` instead of
 `Effect.Effect<Res, Err, R>`. They go in a separate `streamHandlers` field.
 
 ```ts
-import { Effect, Stream } from "effect";
-import * as Runtime from "effect/Runtime";
+import { Context, Effect, Stream } from "effect";
 import { createRpcEndpoint } from "electron-effect-rpc/main";
 import { contract, AiError } from "./contract.ts";
 
@@ -56,7 +55,7 @@ const endpoint = createRpcEndpoint(
     Ping: () => Effect.succeed({ ok: true }),
   },
   {
-    runtime: Runtime.defaultRuntime,
+    context: Context.empty(),
     streamHandlers: {
       StreamAiGeneration: ({ prompt }) =>
         generateTokens(prompt).pipe(Stream.map((token) => ({ delta: token }))),
@@ -71,7 +70,7 @@ If the contract defines `streamMethods` but you omit `streamHandlers`, the
 endpoint throws at construction time.
 
 Stream handlers have access to the same Effect services as regular RPC handlers
-through the injected runtime.
+through the injected `Context`.
 
 ## Step 3: Expose the stream frame channel in preload
 
@@ -145,10 +144,10 @@ const ipc = createIpcKit({
 ```
 
 Bounded stream buffers (`dropping` / `sliding`) are intentionally lossy and are
-not appropriate for token-delta streams where every chunk matters. Under
-sustained pressure, bounded buffering can silently lose terminal signals with
-current `Stream.asyncPush` internals, and there is no recovery path at this
-layer. Prefer unbounded buffering for finite streams.
+not appropriate for token-delta streams where every chunk matters. Effect v4's
+`Stream.callback` queue preserves completion and failure signals, but bounded
+buffers still drop or slide chunks under pressure. Prefer unbounded buffering
+when every chunk matters.
 
 ```ts
 const { client, events, streamClient, dispose } = ipc.renderer(window.api);

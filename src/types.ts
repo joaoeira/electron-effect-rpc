@@ -1,5 +1,5 @@
+import type * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
-import type * as Runtime from "effect/Runtime";
 import type * as Stream from "effect/Stream";
 import type {
   AnyEvent,
@@ -265,7 +265,7 @@ export type RpcEndpointOptions<
   R = never,
 > = {
   readonly channelPrefix?: ChannelPrefix;
-  readonly runtime: Runtime.Runtime<R>;
+  readonly context: Context.Context<R>;
   readonly diagnostics?: RpcEndpointDiagnostics;
   readonly streamHandlers?: StreamImplementations<C, R>;
 };
@@ -354,8 +354,8 @@ export type OnStreamFrame = (listener: (frame: unknown) => void) => () => void;
  * Stream chunk buffering policy in the renderer.
  * Prefer `bufferSize: "unbounded"` for lossless streams such as token deltas.
  *
- * Bounded buffers are lossy. With the current Effect `Stream.asyncPush`
- * internals, terminal signals can also be lost under sustained pressure.
+ * Bounded buffers are lossy for chunks. Effect v4's callback queue still
+ * preserves terminal completion and failure signals.
  */
 export type StreamBufferOptions =
   | { readonly bufferSize: "unbounded" }

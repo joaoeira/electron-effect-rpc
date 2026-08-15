@@ -1,7 +1,5 @@
 import * as S from "effect/Schema";
-import { Cause, Effect, Exit, FiberId, Stream } from "effect";
-import type * as FiberType from "effect/Fiber";
-import * as Runtime from "effect/Runtime";
+import { Cause, Effect, Exit, Fiber, Result, Stream } from "effect";
 import type {
   AnyStreamMethod,
   RpcContract,
@@ -94,7 +92,7 @@ export function createRpcEndpoint<
 ): RpcEndpoint {
   const channelPrefix = resolveChannelPrefix(options.channelPrefix);
   const diagnostics = options.diagnostics;
-  const runPromiseExit = Runtime.runPromiseExit(options.runtime);
+  const runPromiseExit = Effect.runPromiseExitWith(options.context);
 
   const implementationsByName: Implementations<RpcContract<Methods, Events, StreamMethods>, R> &
     Record<string, unknown> = implementations;
@@ -170,7 +168,7 @@ export function createRpcEndpoint<
           }
         }
 
-        const failure = Cause.failureOption(exit.cause);
+        const failure = Cause.findErrorOption(exit.cause);
         if (failure._tag === "Some") {
           if (!encodeFailure) {
             return toDefectEnvelope(
@@ -193,9 +191,9 @@ export function createRpcEndpoint<
           }
         }
 
-        const defect = Cause.dieOption(exit.cause);
-        if (defect._tag === "Some") {
-          return toDefectEnvelope(defect.value, `RPC ${method.name} defect`);
+        const defect = Cause.findDefect(exit.cause);
+        if (Result.isSuccess(defect)) {
+          return toDefectEnvelope(defect.success, `RPC ${method.name} defect`);
         }
 
         return toDefectEnvelope(exit.cause, `RPC ${method.name} interrupted`);
@@ -206,7 +204,7 @@ export function createRpcEndpoint<
   // --- Stream handler setup ---
 
   type ActiveStreamEntry = {
-    fiber: FiberType.RuntimeFiber<void, unknown> | null;
+    fiber: Fiber.Fiber<void, unknown> | null;
     senderId: number;
   };
 
@@ -241,7 +239,7 @@ export function createRpcEndpoint<
       }
     }
 
-    const runFork = Runtime.runFork(options.runtime);
+    const runFork = Effect.runForkWith(options.context);
 
     for (const method of streamMethods) {
       const impl = streamHandlerImpls[method.name];
@@ -321,7 +319,7 @@ export function createRpcEndpoint<
           const buildTerminalFrame = (
             cause: Cause.Cause<unknown>,
           ): StreamEndFrame | StreamErrorFrame | StreamDefectFrame => {
-            const failure = Cause.failureOption(cause);
+            const failure = Cause.findErrorOption(cause);
             if (failure._tag === "Some") {
               if (encodeFailure) {
                 try {
@@ -347,15 +345,16 @@ export function createRpcEndpoint<
                 message: `Stream ${method.name} returned a typed failure, but method declares NoError: ${formatUnknown(failure.value)}`,
               };
             }
-            if (Cause.isInterruptedOnly(cause)) {
+            if (Cause.hasInterruptsOnly(cause)) {
               return { type: "end", streamId };
             }
-            const defect = Cause.dieOption(cause);
+            const defect = Cause.findDefect(cause);
             return {
               type: "defect",
               streamId,
-              message:
-                defect._tag === "Some" ? formatUnknown(defect.value) : "Stream failed unexpectedly",
+              message: Result.isSuccess(defect)
+                ? formatUnknown(defect.success)
+                : "Stream failed unexpectedly",
             };
           };
 
@@ -366,7 +365,7 @@ export function createRpcEndpoint<
           };
 
           const onSenderDestroyed = () => {
-            entry.fiber?.unsafeInterruptAsFork(FiberId.none);
+            entry.fiber?.interruptUnsafe();
           };
 
           const streamEffect = handlerStream.pipe(
@@ -389,7 +388,7 @@ export function createRpcEndpoint<
 
             Effect.andThen(() => trySend({ type: "end", streamId })),
 
-            Effect.catchAllCause((cause) =>
+            Effect.catchCause((cause) =>
               sender.isDestroyed() ? Effect.void : trySend(buildTerminalFrame(cause)),
             ),
 
@@ -409,7 +408,7 @@ export function createRpcEndpoint<
             sender.once("destroyed", onSenderDestroyed);
           }
 
-          let fiber: FiberType.RuntimeFiber<void, unknown>;
+          let fiber: Fiber.Fiber<void, unknown>;
           try {
             fiber = runFork(streamEffect);
           } catch (cause) {
@@ -476,7 +475,7 @@ export function createRpcEndpoint<
 
           // Interrupt the fiber
           if (entry.fiber) {
-            entry.fiber.unsafeInterruptAsFork(FiberId.none);
+            entry.fiber.interruptUnsafe();
           }
 
           return { cancelled: true };
@@ -506,7 +505,7 @@ export function createRpcEndpoint<
     // Interrupt all active stream fibers first
     for (const entry of activeStreams.values()) {
       if (entry.fiber) {
-        entry.fiber.unsafeInterruptAsFork(FiberId.none);
+        entry.fiber.interruptUnsafe();
       }
     }
     activeStreams.clear();
@@ -711,7 +710,11 @@ export function createEventPublisher<
     draining = true;
 
     try {
-      while (running && !disposed && queue.length > 0) {
+      while (queue.length > 0) {
+        if (!running || disposed) {
+          break;
+        }
+
         const next = queue.shift();
         if (!next) {
           continue;
