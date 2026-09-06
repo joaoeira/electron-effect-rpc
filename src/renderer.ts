@@ -357,6 +357,14 @@ export function createEventSubscriber<
           }),
         ),
         (unsubscribe) => Effect.sync(unsubscribe),
+      ).pipe(
+        // Callback acquisition runs in a producer fiber; relay its failure to
+        // the queue so the consumer cannot remain blocked waiting for events.
+        Effect.catchCause((cause) =>
+          Effect.sync(() => {
+            Queue.failCauseUnsafe(queue, cause);
+          }),
+        ),
       ),
     );
 
@@ -651,7 +659,19 @@ export function createStreamRpcClient<
                   Effect.suspend(() =>
                     serverTerminated
                       ? Effect.void
-                      : Effect.tryPromise(() => invoke(`stream-cancel`, { streamId })).pipe(
+                      : Effect.tryPromise({
+                          try: () => invoke(`stream-cancel`, { streamId }),
+                          catch: toDiagnosticCause,
+                        }).pipe(
+                          Effect.tapError((cause) =>
+                            Effect.sync(() =>
+                              safelyCall(diagnostics?.onProtocolError, {
+                                method: `stream-cancel/${method.name}`,
+                                response: { streamId },
+                                cause,
+                              }),
+                            ),
+                          ),
                           Effect.ignore,
                         ),
                   ),

@@ -304,8 +304,13 @@ export function createRpcEndpoint<
                   sender.send(sfChannel, frame);
                 }
               },
-              catch: () => undefined,
-            }).pipe(Effect.ignore);
+              catch: toDiagnosticCause,
+            }).pipe(
+              Effect.tapError((cause) =>
+                Effect.sync(() => reportProtocolError(method.name, frame, cause)),
+              ),
+              Effect.ignore,
+            );
 
           let handlerStream: Stream.Stream<
             StreamChunk<typeof method>,
@@ -379,11 +384,11 @@ export function createRpcEndpoint<
                   return Effect.interrupt;
                 }
 
-                return Effect.try({
-                  try: () =>
-                    sender.send(sfChannel, { type: "data", streamId, payload: encodeChunk(chunk) }),
-                  catch: () => undefined,
-                }).pipe(Effect.ignore);
+                // A lost chunk invalidates the stream. Let the transport boundary
+                // send a defect frame instead of reporting successful completion.
+                return Effect.sync(() =>
+                  sender.send(sfChannel, { type: "data", streamId, payload: encodeChunk(chunk) }),
+                );
               }),
             ),
             Stream.runDrain,

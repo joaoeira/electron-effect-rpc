@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.11.0 - 2026-09-06
+
+### Fixed
+
+- Event streams propagate subscription setup defects to consumers instead of
+  leaving them waiting indefinitely.
+- Main-side stream chunk encoding and send failures terminate the stream with a
+  defect frame instead of silently dropping chunks and reporting success.
+- Failed stream terminal-frame sends report `onProtocolError` diagnostics while
+  still releasing the active stream.
+- Failed renderer `stream-cancel` requests report `onProtocolError` diagnostics
+  with method `stream-cancel/<method name>` while preserving consumer cleanup.
+  Throwing diagnostics callbacks remain isolated from the transport.
+
 ## 0.10.0 - 2026-08-15
 
 ### Breaking
