@@ -108,14 +108,20 @@ class Api extends Context.Service<
 
 const runtime = ManagedRuntime.make(Api.layer);
 
-const version = await runtime.runPromise(Api.use((api) => api.GetVersion()));
+const version = await runtime.runPromise(
+  Effect.gen(function* () {
+    const api = yield* Api;
+    return yield* api.GetVersion();
+  }),
+);
 
 await runtime.runPromise(
-  Api.use((api) =>
-    api
+  Effect.gen(function* () {
+    const api = yield* Api;
+    yield* api
       .Download({ url })
-      .pipe(Stream.runForEach((progress) => Effect.sync(() => render(progress)))),
-  ),
+      .pipe(Stream.runForEach((progress) => Effect.sync(() => render(progress))));
+  }),
 );
 ```
 
