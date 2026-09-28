@@ -2,325 +2,296 @@
 
 [![npm](https://img.shields.io/npm/v/electron-effect-rpc)](https://www.npmjs.com/package/electron-effect-rpc)
 
-Typed, schema-validated IPC for Electron, built on [Effect](https://effect.website).
+An Electron transport for [Effect RPC](https://effect.website).
 
-Define your IPC surface once — methods, events, and streams, each described
-with `effect/Schema` — and get a fully typed client in the renderer, fully
-typed handlers in main, and runtime validation at every process boundary. No
-hand-rolled channel strings, no `any`-typed `invoke` calls, no drift between
-processes.
+You define RPCs with `Rpc` and `RpcGroup`, implement them with `group.toLayer`,
+and call them with `RpcClient`, exactly as you would over HTTP or WebSockets.
+This package only supplies the `RpcServer.Protocol` and `RpcClient.Protocol`
+layers that carry those RPCs between Electron processes:
 
-The primary API is a single shared `createIpcKit` configuration reused across
-main, preload, and renderer. Low-level per-piece factories remain available as
-subpath imports.
+| From     | To                                           | Layers                                                                                      |
+| -------- | -------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| renderer | main                                         | `RendererRpcClient.layerProtocol` → `MainRpcServer.layer`                                   |
+| main     | utility process                              | `UtilityRpcClient.layerProtocol` → `UtilityRpcServer.layer`                                 |
+| renderer | utility process (direct, handed off by main) | `RendererRpcClient.layerProtocol` → `MainRpcServer.layerForward` → `UtilityRpcServer.layer` |
 
-This package is ESM-only. It targets modern Electron runtimes and assumes an
-ESM-capable build pipeline.
+Everything Effect RPC does comes along unchanged: typed errors, streams with
+backpressure, interruption that reaches the server, middleware, tracing across
+processes, and `RpcTest` for unit tests.
 
-## Features
+ESM only. Tested against Electron 38. Peer dependencies: `effect@^4.0.0-rc.109`,
+`electron@>=30`.
 
-- One contract for methods, events, and streaming RPC, shared by all three processes.
-- One kit config, so channel naming can never drift between processes.
-- Schema validation on every IPC crossing, in both directions.
-- Typed domain errors in the Effect error channel; transport problems as `RpcDefectError` with stable codes.
-- Streaming RPC: handlers return `Stream.Stream`, clients consume `Stream.Stream`, cancellation propagates.
-- Main handlers are Effects, run with an injected `Context` (so your services are available).
-- Explicit lifecycle handles (`start`/`stop`/`dispose`) and bounded event queue backpressure.
-- Structured diagnostics hooks for decode/protocol/dispatch failures.
+## Quickstart
 
-## Requirements
-
-- Electron >= 28 with context isolation enabled.
-- ESM-capable bundling.
-- Peer dependencies: `effect` (`^4.0.0-rc.109`), `electron`.
-
-## Installation
-
-```sh
-bun add electron-effect-rpc effect
-```
-
-## Quickstart (Kit-First)
-
-### 1) Define contract and kit once
+### 1. Define the RPCs (shared)
 
 ```ts
-import * as S from "effect/Schema";
-import { createIpcKit, defineContract, event, rpc, streamRpc } from "electron-effect-rpc";
+// rpcs.ts
+import { Schema } from "effect";
+import { Rpc, RpcGroup } from "effect/unstable/rpc";
 
-export const GetAppVersion = rpc("GetAppVersion", S.Struct({}), S.Struct({ version: S.String }));
+export class DownloadFailed extends Schema.TaggedError<DownloadFailed>()("DownloadFailed", {
+  url: Schema.String,
+}) {}
 
-export const WorkUnitProgress = event(
-  "WorkUnitProgress",
-  S.Struct({
-    requestId: S.String,
-    chunk: S.String,
-    done: S.Boolean,
+export class AppRpcs extends RpcGroup.make(
+  Rpc.make("GetVersion", { success: Schema.String }),
+  Rpc.make("Download", {
+    payload: { url: Schema.String },
+    success: Schema.Struct({ received: Schema.Number, total: Schema.Number }),
+    error: DownloadFailed,
+    stream: true,
   }),
-);
+) {}
+```
 
-export const StreamAiGeneration = streamRpc(
-  "StreamAiGeneration",
-  S.Struct({ prompt: S.String }),
-  S.Struct({ delta: S.String }),
-);
+### 2. Serve them from main
 
-const contract = defineContract({
-  methods: [GetAppVersion] as const,
-  events: [WorkUnitProgress] as const,
-  streamMethods: [StreamAiGeneration] as const,
+```ts
+// main.ts
+import { app, BrowserWindow } from "electron";
+import { Effect, Layer, Stream } from "effect";
+import { MainRpcServer } from "electron-effect-rpc/main";
+import { AppRpcs } from "./rpcs.ts";
+
+const Handlers = AppRpcs.toLayer({
+  GetVersion: () => Effect.succeed(app.getVersion()),
+  Download: ({ url }) => downloadWithProgress(url), // a Stream
 });
 
-export const ipc = createIpcKit({ contract });
-```
+const RpcLive = MainRpcServer.layer(AppRpcs).pipe(Layer.provide(Handlers));
 
-`createIpcKit` accepts optional configuration; the values below are the
-defaults, so only set them to deviate:
+app.whenReady().then(() => {
+  const server = Effect.runFork(Layer.launch(RpcLive));
+  app.on("will-quit", () => server.interruptUnsafe());
 
-```ts
-export const ipc = createIpcKit({
-  contract,
-  channelPrefix: { rpc: "rpc/", event: "event/" },
-  bridge: { global: "api" },
-  decode: { rpc: "envelope", events: "safe" },
-  streamBuffer: { bufferSize: "unbounded" },
-});
-```
-
-### 2) Main process
-
-```ts
-import path from "node:path";
-import { app, BrowserWindow, ipcMain } from "electron";
-import { Context, Effect, Stream } from "effect";
-import { ipc, WorkUnitProgress } from "./shared-ipc.ts";
-
-const mainWindow = new BrowserWindow({
-  webPreferences: { preload: path.join(import.meta.dirname, "preload.js") },
-});
-
-const mainRpc = ipc.main({
-  ipcMain,
-  handlers: {
-    GetAppVersion: () => Effect.succeed({ version: app.getVersion() }),
-    // Handlers may take an optional second argument with request context:
-    // GetAppVersion: (_input, { sender }) => ...
-  },
-  streamHandlers: {
-    StreamAiGeneration: ({ prompt }) =>
-      Stream.fromIterable(prompt.split(" ")).pipe(Stream.map((word) => ({ delta: word + " " }))),
-  },
-  context: Context.empty(),
-  getWindows: () => [mainWindow],
-});
-
-mainRpc.start();
-app.on("will-quit", () => mainRpc.dispose());
-
-void Effect.runPromise(
-  mainRpc.publish(WorkUnitProgress, {
-    requestId: "req-1",
-    chunk: "starting",
-    done: false,
-  }),
-);
-```
-
-### 3) Preload
-
-```ts
-import { ipc } from "./shared-ipc.ts";
-
-const { expose } = ipc.preload();
-expose();
-```
-
-This exposes one global by default: `window.api`.
-
-If your preload runtime is ESM-only and does not expose synchronous `require`,
-pass the imported Electron module explicitly:
-
-```ts
-import * as electron from "electron";
-import { ipc } from "./shared-ipc.ts";
-
-const { expose } = ipc.preload({ electronModule: electron });
-expose();
-```
-
-### 4) Renderer
-
-```ts
-import { Effect, Stream } from "effect";
-import { ipc, WorkUnitProgress } from "./shared-ipc.ts";
-
-const { client, events, streamClient, dispose } = ipc.renderer(window.api);
-const { version } = await Effect.runPromise(client.GetAppVersion());
-
-// Streaming RPC
-await Effect.runPromise(
-  streamClient
-    .StreamAiGeneration({ prompt: "hello world" })
-    .pipe(Stream.runForEach((chunk) => Effect.sync(() => console.log(chunk.delta)))),
-);
-
-const unsubscribe = events.subscribe(WorkUnitProgress, (payload) => {
-  console.log(payload.chunk);
-});
-
-// Or consume events as an Effect Stream (unsubscribes when the scope closes):
-await Effect.runPromise(
-  events
-    .stream(WorkUnitProgress)
-    .pipe(Stream.runForEach((payload) => Effect.sync(() => console.log(payload.chunk)))),
-);
-
-// later
-unsubscribe();
-dispose();
-```
-
-Renderer-side diagnostics hooks are available through the second argument:
-
-```ts
-const renderer = ipc.renderer(window.api, {
-  diagnostics: {
-    rpc: { onDecodeFailure: (ctx) => console.warn("rpc decode failure", ctx) },
-    events: { onDecodeFailure: (ctx) => console.warn("event decode failure", ctx) },
-  },
+  new BrowserWindow({
+    webPreferences: { preload: PRELOAD_PATH, sandbox: true, contextIsolation: true },
+  });
 });
 ```
 
-### 5) Window typing
+It doesn't matter whether windows open before or after the server layer
+starts: a renderer that connects early keeps retrying until the endpoint is
+served.
 
-Use the exported `IpcBridgeGlobal` helper so the declared shape stays in sync
-with what `ipc.preload()` exposes:
+### 3. Expose the bridge in preload
 
 ```ts
-import type { IpcBridgeGlobal } from "electron-effect-rpc";
+// preload.ts
+import { exposeRpcBridge } from "electron-effect-rpc/preload";
 
-declare global {
-  interface Window extends IpcBridgeGlobal {}
+exposeRpcBridge();
+```
+
+The bridge knows nothing about your RPCs. It forwards connection requests to
+main and is not involved after that.
+
+### 4. Call them from the renderer
+
+```ts
+// renderer.ts
+import { Context, Effect, Layer, ManagedRuntime, Stream } from "effect";
+import { RpcClient, type RpcClientError } from "effect/unstable/rpc";
+import { RendererRpcClient } from "electron-effect-rpc/renderer";
+import { AppRpcs } from "./rpcs.ts";
+
+class Api extends Context.Service<
+  Api,
+  RpcClient.FromGroup<typeof AppRpcs, RpcClientError.RpcClientError>
+>()("app/Api") {
+  static readonly layer = Layer.effect(Api)(RpcClient.make(AppRpcs)).pipe(
+    Layer.provide(RendererRpcClient.layerProtocol()),
+  );
 }
-```
 
-For a custom global name, use `IpcBridgeGlobal<"myBridge">`.
+const runtime = ManagedRuntime.make(Api.layer);
 
-## Error Model
+const version = await runtime.runPromise(Api.use((api) => api.GetVersion()));
 
-A call site sees exactly two kinds of failure in the Effect error channel:
-
-- **Domain failures** — the tagged errors you declared in the contract's error
-  schema, decoded back into those same tagged values.
-- **`RpcDefectError`** — everything else: transport problems, schema
-  mismatches, and unexpected main-process exceptions. It is itself tagged
-  (`_tag: "RpcDefectError"`) and carries a stable `code` discriminator.
-
-```ts
-import { Effect } from "effect";
-
-const result = await Effect.runPromise(
-  client.DeleteWorkspace({ id }).pipe(
-    // a tagged error you declared in the contract
-    Effect.catchTag("AccessDeniedError", (e) =>
-      Effect.succeed({ deleted: false, reason: e.message }),
-    ),
-    // transport/contract problems
-    Effect.catchTag("RpcDefectError", (defect) =>
-      Effect.sync(() => log.error(defect.code, defect.message)).pipe(
-        Effect.andThen(Effect.fail(defect)),
-      ),
-    ),
+await runtime.runPromise(
+  Api.use((api) =>
+    api
+      .Download({ url })
+      .pipe(Stream.runForEach((progress) => Effect.sync(() => render(progress)))),
   ),
 );
 ```
 
-`RpcDefectError.code` values:
+## Why MessagePorts
 
-| Code                              | Meaning                                                             |
-| --------------------------------- | ------------------------------------------------------------------- |
-| `request_encoding_failed`         | Request payload failed schema encoding before leaving the renderer. |
-| `invoke_failed`                   | The underlying `ipcRenderer.invoke` rejected (transport failure).   |
-| `success_payload_decoding_failed` | Main's success payload failed response schema decoding.             |
-| `failure_payload_decoding_failed` | Main's typed failure payload failed error schema decoding.          |
-| `noerror_contract_violation`      | A failure arrived for a method that declares `NoError`.             |
-| `invalid_response_envelope`       | The response was not a valid envelope.                              |
-| `legacy_decode_failed`            | `dual` decode mode could not parse a legacy `Exit` payload.         |
-| `remote_defect`                   | The main-side handler died, threw, or was interrupted.              |
-| `stream_invoke_failed`            | The stream handshake invoke rejected (transport failure).           |
-| `stream_handshake_invalid`        | The stream handshake response had an unexpected shape.              |
-| `stream_chunk_decode_failed`      | A stream chunk failed schema decoding.                              |
-| `stream_error_decode_failed`      | A stream's typed error frame failed schema decoding.                |
+Every connection is its own
+[`MessagePort`](https://www.electronjs.org/docs/latest/tutorial/message-ports).
+The page creates a `MessageChannel`, the preload forwards one end to main, and
+from then on the page and main talk over the port directly. That choice is
+what makes the rest simple:
 
-Defect envelopes carry the main-process error message verbatim across IPC. If
-any window in your app loads remote or less-trusted content, treat that as
-information disclosure: catch and sanitize errors in your handlers rather than
-letting raw exceptions (paths, query fragments) become defects.
+- **Disconnects are free.** When a page reloads, navigates, crashes or its
+  window closes, Electron closes its port. The server sees the client
+  disconnect and interrupts everything it had in flight: handlers, streams,
+  their finalizers. Nothing has to watch `webContents` events.
+- **Ordered and duplex.** Effect RPC's protocol is a stream of messages in both
+  directions: requests, stream chunks, acknowledgements and interrupts. A port
+  carries exactly that. `ipcRenderer.invoke`, which is one request and one
+  response, does not.
+- **No serialization step.** RPC payloads are already schema-encoded, and ports
+  copy messages with structured clone, so envelopes are posted as they are.
+- **Nothing to keep in sync.** There is one IPC channel, used only to hand
+  over ports, and it is internal. The page can reach nothing else through the
+  bridge. Endpoints are plain names (`"default"` unless you choose one).
+- **Other processes work the same way.** A port can be handed to a utility
+  process, so a renderer can talk to one directly while main does no relaying.
 
-## Operational Notes
+The bridge does not use `contextBridge`, because `contextBridge` cannot carry a
+`MessagePort`. It listens for `window.postMessage` requests from the page
+itself (not from embedded frames) and forwards the port to main.
 
-**Stream backpressure.** Stream frames are pushed from main as fast as the
-handler produces them; there is no acknowledgment across the IPC boundary. The
-renderer buffers with `bufferSize: "unbounded"` by default, which is lossless
-but means a fast producer with a slow consumer grows renderer memory. Bounded
-buffers (`dropping`/`sliding`) are lossy by design, while completion and failure
-signals remain reliable through Effect v4's `Stream.callback` queue. Rate-limit
-fast producers in the handler (`Stream.throttle`, batching) rather than relying
-on a bounded renderer buffer.
+## Connection semantics
 
-**Unary RPC cancellation.** Interrupting the renderer-side Effect of a
-client call (e.g. via `Effect.timeout`) does not abort the main-side handler;
-the underlying `ipcRenderer.invoke` is not abortable. The handler runs to
-completion and its response is discarded. Streaming RPC does propagate
-cancellation to main. If a unary handler does expensive work, model it as a
-stream or build explicit cancellation into your contract.
+- **Before connecting.** Calls made before the connection is established wait
+  for it. The client connects with a handshake and retries with backoff (100ms
+  up to 2s by default, `retrySchedule` to change it). Each failed attempt is
+  logged as a warning.
+- **Established connection drops.** Calls in flight fail with an
+  `RpcClientError` whose reason is a `SocketCloseError`: the server may or may
+  not have run them, so they are not retried. The client reconnects, and later
+  calls go through. A call started synchronously while that failure is being
+  delivered (an `Effect.retry` with no delay, for example) fails with the same
+  error ([Effect-TS/effect#8600](https://github.com/Effect-TS/effect/issues/8600)),
+  so retry with a delay.
+- **Refused connection.** The client does not retry. Pending and future calls
+  fail with an `RpcClientError` whose reason is an `RpcClientDefect` carrying
+  the reason for the refusal.
+- **Interrupting a call.** This interrupts the handler on the server.
+  Interrupting a call that is still waiting for the connection removes it: the
+  server never sees it.
+- **Streams.** Streams are backpressured. The server waits for the client to
+  acknowledge each chunk, so a slow consumer holds the producer back, to within
+  the client's stream buffer (16 items by default, the `streamBufferSize` call
+  option).
+- **Defects.** A defect in a handler fails only that call. Effect RPC's own
+  default fails every call from the same client; `disableFatalDefects: false`
+  restores it.
 
-**Renderer teardown.** Main interrupts a stream's fiber when the renderer's
-`webContents` is destroyed (immediately when the real Electron `WebContents`
-event emitter is available, otherwise on the next chunk), so handler fibers do
-not outlive closed windows.
+## Knowing who is calling
 
-## Migration Notes
+Handlers served from main can get the calling renderer by adding
+`RendererSenderMiddleware` to the RPCs (or the group) and reading
+`RendererSender`:
 
-See [CHANGELOG.md](./CHANGELOG.md) for breaking changes between versions.
+```ts
+import { RendererSender, RendererSenderMiddleware } from "electron-effect-rpc";
 
-## Low-Level APIs (Still Supported)
+export class WindowRpcs extends RpcGroup.make(Rpc.make("Minimize")).middleware(
+  RendererSenderMiddleware,
+) {}
 
-If you need direct control, keep using subpath entry points:
+WindowRpcs.toLayer({
+  Minimize: () =>
+    Effect.gen(function* () {
+      const { webContents } = yield* RendererSender;
+      BrowserWindow.fromWebContents(webContents)?.minimize();
+    }),
+});
+```
 
-- `electron-effect-rpc/contract` — `rpc`, `event`, `streamRpc`, `defineContract`
-- `electron-effect-rpc/main` — `createRpcEndpoint`, `createEventPublisher`
-- `electron-effect-rpc/renderer` — `createRpcClient`, `createEventSubscriber`, `createStreamRpcClient`
-- `electron-effect-rpc/preload` — `exposeIpcBridge`, `createBridgeAdapters`
-- `electron-effect-rpc/types` — shared types, `RpcDefectError`, `assertValidChannelPrefix`
-- `electron-effect-rpc/testing` — `createInvokeStub`, `createDeferred` for unit-testing clients without Electron
+`MainRpcServer.layer` provides the middleware. The sender is the `webContents`
+and frame that opened the connection.
 
-## Root API Surface
+## Authorization
 
-The root entry point exports:
+A renderer can use an endpoint once its preload has called `exposeRpcBridge()`.
+Narrow that on either side:
 
-- `createIpcKit`
-- `rpc`, `event`, `streamRpc`, `defineContract`, `NoError`
-- Types: `IpcKit`, `IpcKitOptions`, `IpcMainHandle`, `IpcBridge`, `IpcBridgeGlobal`
+```ts
+// main: decide per connection (a boolean or an Effect<boolean>)
+MainRpcServer.layer(AdminRpcs, {
+  endpoint: "admin",
+  authorize: ({ frame }) => frame?.url.startsWith("app://admin/") ?? false,
+});
 
-Low-level factories like `createRpcClient` remain subpath-only by design.
+// preload: limit which endpoints this page can reach
+exposeRpcBridge({ endpoints: ["default"] });
+```
 
-## Documentation
+Refused renderers get an error for each call and do not reconnect.
 
-For deeper walkthroughs and production guidance:
+## Utility processes
 
-- [Tutorial Index](./docs/tutorials/README.md)
-- [First RPC: Main + Preload + Renderer](./docs/tutorials/01-first-rpc.md)
-- [Typed Errors, Defects, and Diagnostics](./docs/tutorials/02-typed-errors-defects-diagnostics.md)
-- [Events, Lifecycle, and Backpressure](./docs/tutorials/03-events-lifecycle-backpressure.md)
-- [Streaming RPC](./docs/tutorials/04-streaming-rpc.md)
-- [Architecture overview](./docs/architecture.md) and [ADRs](./docs/adr/) for design rationale.
+Serve a group from a utility process:
 
-## Repository Conventions
+```ts
+// worker.ts (utility process entry)
+import { Effect, Layer } from "effect";
+import { UtilityRpcServer } from "electron-effect-rpc/utility";
 
-- Relative imports use `.ts` extensions.
-- Package imports are extensionless.
-- No `index.ts` barrel files in subpath modules.
+Effect.runFork(
+  Layer.launch(UtilityRpcServer.layer(WorkerRpcs).pipe(Layer.provide(WorkerHandlers))),
+);
+```
+
+Call it from main:
+
+```ts
+import { utilityProcess } from "electron";
+import { UtilityRpcClient } from "electron-effect-rpc/main";
+
+const child = utilityProcess.fork(WORKER_PATH);
+
+const WorkerLive = Layer.effect(Worker)(RpcClient.make(WorkerRpcs)).pipe(
+  Layer.provide(UtilityRpcClient.layerProtocol(child)),
+);
+```
+
+When the utility process exits, in-flight calls fail and later calls fail
+immediately instead of waiting to reconnect.
+
+Or let renderers call it directly. Main hands each renderer's port to the
+utility process and relays nothing:
+
+```ts
+// main
+MainRpcServer.layerForward({ endpoint: "worker", target: child });
+
+// renderer
+RendererRpcClient.layerProtocol({ endpoint: "worker" });
+```
+
+## Several groups or endpoints
+
+One endpoint serves one group; combine groups with `RpcGroup.merge`, or serve
+them on separate endpoints:
+
+```ts
+Layer.mergeAll(
+  MainRpcServer.layer(AppRpcs),
+  MainRpcServer.layer(SettingsRpcs, { endpoint: "settings" }),
+);
+```
+
+## Binary data
+
+Effect RPC encodes payloads with each schema's JSON codec, which turns a
+`Uint8Array` into base64. Structured clone can carry bytes as they are, so use
+`Transferable.Uint8Array` from `effect/unstable/workers` for large binary
+fields. It skips the JSON codec and leaves the value untouched.
+
+## Custom topologies
+
+`PortProtocol` (from the root entry point) is the transport underneath: an
+`RpcServer.Protocol` that accepts ports, and an `RpcClient.Protocol` that
+connects with any effect producing a port. Use it for ports you move around
+yourself, for example between two renderers or into a web worker.
+
+## Development
+
+```sh
+bun test              # protocol behavior over in-memory ports
+bun run test:electron # the transport in real Electron: sandboxed renderers, reloads, crashes, utility processes
+bun run test:types
+bun run lint
+```
 
 ## License
 

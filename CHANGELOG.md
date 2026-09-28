@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Breaking: rewritten as an Effect RPC transport
+
+The package no longer has its own contract, envelope protocol, stream frames,
+event publisher or lifecycle handles. RPCs are defined with Effect's
+`Rpc`/`RpcGroup`, served with `RpcServer` and called with `RpcClient`; this
+package provides the `Protocol` layers that carry them between Electron
+processes over `MessagePort`s.
+
+- `electron-effect-rpc/main`: `MainRpcServer` (serve renderers, forward
+  renderer connections to utility processes) and `UtilityRpcClient`.
+- `electron-effect-rpc/renderer`: `RendererRpcClient`.
+- `electron-effect-rpc/preload`: `exposeRpcBridge`, a contract-agnostic port
+  relay. It does not use `contextBridge`.
+- `electron-effect-rpc/utility`: `UtilityRpcServer`.
+- `electron-effect-rpc`: `PortProtocol` (the transport core),
+  `RendererSender` and `RendererSenderMiddleware`.
+- Removed: `createIpcKit`, `defineContract`, `rpc`, `streamRpc`, `event`,
+  `createRpcEndpoint`, `createEventPublisher`, `createRpcClient`,
+  `createEventSubscriber`, `RpcDefectError`, diagnostics hooks, and the
+  `contract`, `types` and `testing` entry points. Events become streaming RPCs
+  (for example `Stream.fromPubSub`), diagnostics become Effect tracing and
+  logging, and tests use `RpcTest`.
+- Stream backpressure, interruption of unary calls, and cleanup when a
+  renderer reloads, crashes or closes now come from the protocol itself.
+- The `electron` peer dependency is now `>=30`.
+
 ## 0.11.0 - 2026-09-06
 
 ### Fixed

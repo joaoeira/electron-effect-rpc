@@ -1,14 +1,14 @@
 {
   "name": "electron-effect-rpc",
   "version": "0.11.0",
-  "description": "Typed IPC RPC for Electron, built on Effect",
+  "description": "Effect RPC transport for Electron: RpcServer and RpcClient over MessagePorts between main, renderer and utility processes",
   "keywords": [
     "effect",
     "electron",
     "ipc",
+    "messageport",
     "rpc",
-    "schema",
-    "typed"
+    "utility-process"
   ],
   "license": "MIT",
   "repository": {
@@ -38,29 +38,19 @@
       "types": "./dist/preload.d.ts",
       "default": "./dist/preload.js"
     },
-    "./contract": {
-      "types": "./dist/contract.d.ts",
-      "default": "./dist/contract.js"
-    },
-    "./types": {
-      "types": "./dist/types.d.ts",
-      "default": "./dist/types.js"
-    },
-    "./testing": {
-      "types": "./dist/testing.d.ts",
-      "default": "./dist/testing.js"
+    "./utility": {
+      "types": "./dist/utility.d.ts",
+      "default": "./dist/utility.js"
     }
   },
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "bun run build",
-    "test:unit": "bun test",
-    "test:types": "bun run typecheck && bunx tsc -p tsconfig.type-tests.json --noEmit",
-    "test:packaging": "bash ./scripts/run-packaging-checks.sh",
-    "test:integration": "bun test __tests__/integration.test.ts",
-    "test:stress": "bun test __tests__/stress.test.ts",
-    "test:full": "bun run test:unit && bun run test:types && bun run test:packaging && bun run test:integration && bun run test:stress",
     "test": "bun test",
+    "test:electron": "bun test-electron/run.ts",
+    "test:types": "tsc -p tsconfig.test.json",
+    "test:packaging": "bash ./scripts/run-packaging-checks.sh",
+    "test:full": "bun run test:types && bun test && bun run test:electron && bun run test:packaging",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
@@ -79,7 +69,7 @@
   },
   "peerDependencies": {
     "effect": "^4.0.0-rc.109",
-    "electron": ">=28.0.0"
+    "electron": ">=30.0.0"
   },
   "engines": {
     "node": ">=18.0.0"

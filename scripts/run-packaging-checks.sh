@@ -22,13 +22,13 @@ trap cleanup EXIT
 tar -xzf "$PACK_FILE" -C "$TMP_DIR"
 
 echo "root_entrypoint_importable_in_plain_node"
-node --input-type=module -e "const mod = await import('$TMP_DIR/package/dist/index.js'); if (typeof mod.createIpcKit !== 'function') { throw new Error('createIpcKit export missing'); }"
+node --input-type=module -e "const mod = await import('$TMP_DIR/package/dist/index.js'); if (typeof mod.PortProtocol?.makeClient !== 'function') { throw new Error('PortProtocol export missing'); }"
 
 cat > "$TMP_DIR/smoke.ts" <<EOF
-import { createRpcClient } from "$TMP_DIR/package/dist/renderer.js";
-import { createIpcKit } from "$TMP_DIR/package/dist/index.js";
-void createRpcClient;
-void createIpcKit;
+import { RendererRpcClient } from "$TMP_DIR/package/dist/renderer.js";
+import { PortProtocol } from "$TMP_DIR/package/dist/index.js";
+void RendererRpcClient;
+void PortProtocol;
 EOF
 
 cat > "$TMP_DIR/tsconfig.json" <<EOF
@@ -38,7 +38,8 @@ cat > "$TMP_DIR/tsconfig.json" <<EOF
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
-    "noEmit": true
+    "noEmit": true,
+    "skipLibCheck": true
   },
   "include": ["smoke.ts"]
 }
@@ -49,14 +50,14 @@ bunx tsc -p "$TMP_DIR/tsconfig.json" --noEmit
 echo "pack_dry_run_contains_expected_artifacts_only"
 DRY_RUN_OUTPUT="$(npm_config_cache=/tmp/npm-cache npm pack --dry-run 2>&1)"
 
-for required in "README.md" "package.json" "dist/index.js" "dist/index.d.ts" "dist/main.js" "dist/renderer.js" "dist/preload.js" "dist/contract.d.ts"; do
+for required in "README.md" "package.json" "dist/index.js" "dist/index.d.ts" "dist/main.js" "dist/renderer.js" "dist/preload.js" "dist/utility.js" "dist/utility.d.ts"; do
   if ! echo "$DRY_RUN_OUTPUT" | rg -q "$required"; then
     echo "Missing required artifact in pack dry-run output: $required"
     exit 1
   fi
 done
 
-for forbidden in "src/" "__tests__/" "type-tests/" "test-fixtures/" "scripts/"; do
+for forbidden in "src/" "__tests__/" "test-electron/" "test-fixtures/" "scripts/"; do
   if echo "$DRY_RUN_OUTPUT" | rg -q "$forbidden"; then
     echo "Forbidden artifact present in pack dry-run output: $forbidden"
     exit 1

@@ -11,3 +11,4 @@
 .windsurf/
 agents/
 tools/oxlint/anti-slop/
+test-electron/build/
