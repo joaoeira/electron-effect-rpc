@@ -17,12 +17,10 @@ export class FakePort implements Port {
   private listeners: PortListeners | undefined;
   private inbox: Array<Message | Junk> = [];
   closed = false;
-  readonly sent: Array<Message> = [];
 
   postMessage(message: Message): void {
     const peer = this.peer;
     if (this.closed || peer === undefined || peer.closed) return;
-    this.sent.push(message);
     const data = structuredClone(message);
     setTimeout(() => peer.deliver(data), 0);
   }

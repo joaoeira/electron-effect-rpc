@@ -293,7 +293,7 @@ yourself, for example between two renderers or into a web worker.
 ## Development
 
 ```sh
-bun test              # protocol behavior over in-memory ports
+bun test              # protocol behavior over in-memory ports, including generated histories (PROPERTY_RUNS=1000 for a deeper search)
 bun run test:electron # the transport in real Electron: sandboxed renderers, reloads, crashes, utility processes
 bun run test:types
 bun run lint
