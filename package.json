@@ -1,6 +1,6 @@
 {
   "name": "electron-effect-rpc",
-  "version": "0.11.0",
+  "version": "1.0.0",
   "description": "Effect RPC transport for Electron: RpcServer and RpcClient over MessagePorts between main, renderer and utility processes",
   "keywords": [
     "effect",
