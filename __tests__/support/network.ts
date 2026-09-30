@@ -1,4 +1,4 @@
-import type { RpcMessage } from "effect/unstable/rpc";
+import type { RpcMessage } from "effect/rpc";
 import type { Port, PortListeners } from "../../src/PortProtocol.ts";
 
 type Message = RpcMessage.FromClientEncoded | RpcMessage.FromServerEncoded;

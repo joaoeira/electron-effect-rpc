@@ -23,7 +23,7 @@
  * @since 1.0.0
  */
 import { Context } from "effect";
-import { RpcMiddleware } from "effect/unstable/rpc";
+import { RpcMiddleware } from "effect/rpc";
 import type { WebContents, WebFrameMain } from "electron";
 
 /**

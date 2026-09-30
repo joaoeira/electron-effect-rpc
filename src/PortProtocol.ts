@@ -19,8 +19,9 @@
  */
 import { Deferred, Duration, Effect, FiberSet, Predicate, Queue, Schedule, Schema } from "effect";
 import type { Fiber, Scope } from "effect";
-import { RpcClient, RpcClientError, RpcMessage, RpcServer } from "effect/unstable/rpc";
-import { Socket } from "effect/unstable/socket";
+import { RpcClient, RpcClientError, RpcMessage, RpcServer } from "effect/rpc";
+import type { RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import { rejection } from "./internal/connect.ts";
 
 /**
@@ -128,6 +129,11 @@ type FromServerWire = typeof FromServerWire.Type;
 
 const isFromServerEncoded = Schema.is(FromServerWire);
 
+// Fills the payload, chunk, exit and defect holes of the envelopes. Ports copy
+// with structured clone and involve no `RpcSerialization`, so this uses the JSON
+// codec, as Effect's own worker protocols do.
+const codecFor: RpcSerialization.CodecFor = Schema.toCodecJson;
+
 // ---------------------------------------------------------------------------
 // Server
 // ---------------------------------------------------------------------------
@@ -196,6 +202,8 @@ export const makeServer = <Metadata>(): Effect.Effect<PortServer<Metadata>, neve
         supportsAck: true,
         supportsTransferables: false,
         supportsSpanPropagation: true,
+        supportsNotifications: true,
+        codecFor,
       });
     });
 
@@ -516,6 +524,7 @@ export const makeClient = (
         },
         supportsAck: true,
         supportsTransferables: false,
+        codecFor,
       };
     }),
   );

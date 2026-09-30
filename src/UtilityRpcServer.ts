@@ -12,8 +12,8 @@
  * @since 1.0.0
  */
 import { Context, Effect, Layer, Predicate } from "effect";
-import type { Rpc, RpcGroup } from "effect/unstable/rpc";
-import { RpcServer } from "effect/unstable/rpc";
+import type { Rpc, RpcGroup } from "effect/rpc";
+import { RpcServer } from "effect/rpc";
 import type { MessageEvent } from "electron";
 import { defaultEndpoint } from "./internal/connect.ts";
 import { fromMessagePortMain, makeEndpointRegistry } from "./internal/endpoints.ts";

@@ -19,7 +19,7 @@ Everything Effect RPC does comes along unchanged: typed errors, streams with
 backpressure, interruption that reaches the server, middleware, tracing across
 processes, and `RpcTest` for unit tests.
 
-ESM only. Tested against Electron 38. Peer dependencies: `effect@^4.0.0-rc.109`,
+ESM only. Tested against Electron 38. Peer dependencies: `effect@^4.0.0-rc.118`,
 `electron@>=30`.
 
 ## Quickstart
@@ -29,7 +29,7 @@ ESM only. Tested against Electron 38. Peer dependencies: `effect@^4.0.0-rc.109`,
 ```ts
 // rpcs.ts
 import { Schema } from "effect";
-import { Rpc, RpcGroup } from "effect/unstable/rpc";
+import { Rpc, RpcGroup } from "effect/rpc";
 
 export class DownloadFailed extends Schema.TaggedError<DownloadFailed>()("DownloadFailed", {
   url: Schema.String,
@@ -93,7 +93,7 @@ main and is not involved after that.
 ```ts
 // renderer.ts
 import { Context, Effect, Layer, ManagedRuntime, Stream } from "effect";
-import { RpcClient, type RpcClientError } from "effect/unstable/rpc";
+import { RpcClient, type RpcClientError } from "effect/rpc";
 import { RendererRpcClient } from "electron-effect-rpc/renderer";
 import { AppRpcs } from "./rpcs.ts";
 
@@ -280,8 +280,8 @@ Layer.mergeAll(
 
 Effect RPC encodes payloads with each schema's JSON codec, which turns a
 `Uint8Array` into base64. Structured clone can carry bytes as they are, so use
-`Transferable.Uint8Array` from `effect/unstable/workers` for large binary
-fields. It skips the JSON codec and leaves the value untouched.
+`Transferable.Uint8Array` from `effect/workers` for large binary fields. It
+skips the JSON codec and leaves the value untouched.
 
 ## Custom topologies
 

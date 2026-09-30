@@ -12,9 +12,10 @@ import {
   Scope,
   Stream,
 } from "effect";
-import { FastCheck as fc, TestClock } from "effect/testing";
-import { Rpc, RpcClient, RpcGroup, RpcServer } from "effect/unstable/rpc";
-import type { RpcClientError } from "effect/unstable/rpc";
+import { TestClock } from "effect/testing";
+import * as fc from "fast-check";
+import { Rpc, RpcClient, RpcGroup, RpcServer } from "effect/rpc";
+import type { RpcClientError } from "effect/rpc";
 import * as PortProtocol from "../src/PortProtocol.ts";
 import { Network } from "./support/network.ts";
 

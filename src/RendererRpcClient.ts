@@ -16,8 +16,8 @@
  */
 import { Effect, Layer } from "effect";
 import type { Duration, Schedule } from "effect";
-import { RpcClient } from "effect/unstable/rpc";
-import type { RpcClientError } from "effect/unstable/rpc";
+import { RpcClient } from "effect/rpc";
+import type { RpcClientError } from "effect/rpc";
 import { connectRequest, defaultEndpoint } from "./internal/connect.ts";
 import * as PortProtocol from "./PortProtocol.ts";
 

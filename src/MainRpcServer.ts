@@ -13,8 +13,8 @@
  * @since 1.0.0
  */
 import { Context, Effect, FiberSet, Layer } from "effect";
-import type { Rpc, RpcGroup } from "effect/unstable/rpc";
-import { RpcServer } from "effect/unstable/rpc";
+import type { Rpc, RpcGroup } from "effect/rpc";
+import { RpcServer } from "effect/rpc";
 import { ipcMain } from "electron";
 import type { IpcMainEvent, MessagePortMain, UtilityProcess } from "electron";
 import { connectRequest, connectTag, defaultEndpoint } from "./internal/connect.ts";

@@ -1,6 +1,6 @@
 import { Context, Schema } from "effect";
-import { Rpc, RpcGroup } from "effect/unstable/rpc";
-import type { RpcClient, RpcClientError } from "effect/unstable/rpc";
+import { Rpc, RpcGroup } from "effect/rpc";
+import type { RpcClient, RpcClientError } from "effect/rpc";
 import { RendererSenderMiddleware } from "../../src/index.ts";
 
 export class AppRpcs extends RpcGroup.make(

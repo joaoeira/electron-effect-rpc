@@ -12,8 +12,8 @@
  */
 import { Effect, Layer, Schedule } from "effect";
 import type { Duration } from "effect";
-import { RpcClient, RpcClientError } from "effect/unstable/rpc";
-import { Socket } from "effect/unstable/socket";
+import { RpcClient, RpcClientError } from "effect/rpc";
+import { Socket } from "effect/socket";
 import { MessageChannelMain } from "electron";
 import type { UtilityProcess } from "electron";
 import { connectRequest, defaultEndpoint } from "./internal/connect.ts";

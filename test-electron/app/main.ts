@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Effect, Layer, ManagedRuntime, Option, Schema } from "effect";
-import { RpcClient } from "effect/unstable/rpc";
+import { RpcClient } from "effect/rpc";
 import { app, BrowserWindow, utilityProcess } from "electron";
 import type { UtilityProcess } from "electron";
 import { RendererSender } from "../../src/index.ts";

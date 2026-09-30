@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Works with `effect@4.0.0-rc.118`. That release moved the RPC modules out of
+  `unstable` (`effect/unstable/rpc` is now `effect/rpc`) and added `codecFor`
+  and `supportsNotifications` to the RPC `Protocol` services, so 1.0.0 fails to
+  load against it. Payloads are still encoded with each schema's JSON codec.
+- The `effect` peer dependency is now `^4.0.0-rc.118`. On `effect` rc.109 to
+  rc.117, stay on 1.0.0.
+
 ## 1.0.0 - 2026-09-30
 
 ### Breaking: rewritten as an Effect RPC transport

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Schedule, Schema, Scope, Stream } from "effect";
-import { Rpc, RpcClient, RpcClientError, RpcGroup, RpcServer } from "effect/unstable/rpc";
+import { Rpc, RpcClient, RpcClientError, RpcGroup, RpcServer } from "effect/rpc";
 import * as PortProtocol from "../src/PortProtocol.ts";
 import { makeChannel, type FakePort } from "./support/ports.ts";
 

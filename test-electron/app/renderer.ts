@@ -1,5 +1,5 @@
 import { Cause, Effect } from "effect";
-import { RpcClient } from "effect/unstable/rpc";
+import { RpcClient } from "effect/rpc";
 import { RendererRpcClient } from "../../src/renderer.ts";
 import { AppRpcs, WorkerRpcs, type PageResult } from "./shared.ts";
 
